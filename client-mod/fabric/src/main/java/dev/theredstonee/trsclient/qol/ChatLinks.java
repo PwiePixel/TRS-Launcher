@@ -5,6 +5,7 @@ import dev.theredstonee.trsclient.compat.ChatLines;
 import dev.theredstonee.trsclient.compat.Mc;
 import dev.theredstonee.trsclient.core.chat.ChatCoords;
 import dev.theredstonee.trsclient.core.chat.ChatText;
+import dev.theredstonee.trsclient.core.chat.ChatWaypoints;
 import dev.theredstonee.trsclient.core.clips.ScreenshotShare;
 import dev.theredstonee.trsclient.core.i18n.I18n;
 import dev.theredstonee.trsclient.core.module.TrsModules;
@@ -27,11 +28,11 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * Anklickbares im Minecraft-Chat (nur lokal, sendet nichts): Koordinaten werden unterstrichen und öffnen per Klick
- * „Als Wegpunkt speichern“; die Vanilla-Zeile „Bildschirmfoto gespeichert …“ bekommt „[Als Link teilen]“. Erkannt
- * wird der Klick am Einfüge-Text des Stils ({@code "x y z"} bzw. {@code trs-share:<datei>}) – Umschalt-Klick fügt
- * wie in Vanilla nur diesen Text ins Eingabefeld ein. Ab 1.16; davor bleibt der Chat unverändert.
- * Dieselbe Datei in allen Mojmap-Bäumen.
+ * Anklickbares im Minecraft-Chat (nur lokal, sendet nichts): Koordinaten und geteilte Wegpunkte von Xaero's Minimap
+ * bzw. JourneyMap werden unterstrichen und öffnen per Klick „Als Wegpunkt speichern“; die Vanilla-Zeile
+ * „Bildschirmfoto gespeichert …“ bekommt „[Als Link teilen]“. Erkannt wird der Klick am Einfüge-Text des Stils
+ * ({@code "x y z"}, die geteilte Nachricht bzw. {@code trs-share:<datei>}) – Umschalt-Klick fügt wie in Vanilla nur
+ * diesen Text ins Eingabefeld ein. Ab 1.16; davor bleibt der Chat unverändert. Dieselbe Datei in allen Mojmap-Bäumen.
  */
 public final class ChatLinks {
 	private static boolean uploading;
@@ -100,7 +101,7 @@ public final class ChatLinks {
 			int pos = 0;
 			for (ChatCoords.Hit h : hits) {
 				if (h.start > pos) out.append(QolText.literal(ChatText.activeCodes(text.substring(0, pos)) + text.substring(pos, h.start)).setStyle(style));
-				Style mark = style.withUnderlined(true).withInsertion(h.insertion()).withHoverEvent(hover(hoverText));
+				Style mark = style.withUnderlined(true).withInsertion(h.insertion()).withHoverEvent(hover(h.hover(hoverText)));
 				out.append(QolText.literal(ChatText.activeCodes(text.substring(0, h.start)) + text.substring(h.start, h.end)).setStyle(mark));
 				pos = h.end;
 			}
@@ -133,7 +134,13 @@ public final class ChatLinks {
 		String ins = style.getInsertion();
 		if (ins == null) return false;
 		try {
-			int[] c = coordsOn(modules()) ? ChatCoords.parseInsertion(ins) : null;
+			boolean coords = coordsOn(modules());
+			ChatWaypoints.Shared shared = coords ? ChatWaypoints.parse(ins) : null;
+			if (shared != null) {
+				openSave(shared);
+				return true;
+			}
+			int[] c = coords ? ChatCoords.parseInsertion(ins) : null;
 			if (c != null) {
 				openSave(c[0], c[1], c[2]);
 				return true;
@@ -213,7 +220,20 @@ public final class ChatLinks {
 
 	/** Fenster „Als Wegpunkt speichern“ (ersetzt den Chat). */
 	public static void openSave(int x, int y, int z) {
-		WaypointSaveUi.Host host = new WaypointSaveUi.Host() {
+		openSave(new WaypointSaveUi(saveHost(), x, y, z, I18n.tr("waypoint.save.defaultName")));
+	}
+
+	/** Fenster „Als Wegpunkt speichern“ für einen Wegpunkt von Xaero's Minimap bzw. JourneyMap (Name, Farbe, Dimension). */
+	public static void openSave(ChatWaypoints.Shared shared) {
+		openSave(new WaypointSaveUi(saveHost(), shared));
+	}
+
+	private static void openSave(WaypointSaveUi ui) {
+		Mc.setScreen(new TrsUiScreen(I18n.tr("waypoint.save.title"), ui));
+	}
+
+	private static WaypointSaveUi.Host saveHost() {
+		return new WaypointSaveUi.Host() {
 			@Override
 			public void closeScreen() {
 				Mc.setScreen(null);
@@ -234,8 +254,6 @@ public final class ChatLinks {
 				return null;
 			}
 		};
-		Mc.setScreen(new TrsUiScreen(I18n.tr("waypoint.save.title"),
-				new WaypointSaveUi(host, x, y, z, I18n.tr("waypoint.save.defaultName"))));
 	}
 
 	/** „[Als Link teilen]“: hochladen, Link in die Zwischenablage, Hinweis + Chatzeile mit dem Link. */
