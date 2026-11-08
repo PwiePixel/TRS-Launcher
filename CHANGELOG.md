@@ -28,6 +28,18 @@ How to write an entry:
   "node --experimental-strip-types scripts/changelog.mjs set-contributors <version> <name1,name2>".
 -->
 
+## Unreleased
+
+### English
+
+- **TRS Client: waypoints from Xaero's Minimap and JourneyMap in the chat.** When someone shares a waypoint in the game chat with Xaero's Minimap (`xaero-waypoint:…`) or JourneyMap (`[name:…, x:…, z:…]`, VoxelMap writes the same), the TRS Client now underlines it, even if you don't have that mod. Point at it to see the name, the mod, the position and the dimension. One click opens "Save as waypoint" with the name, colour and letters already filled in and saves the waypoint in its own dimension – a Nether waypoint stays in the Nether, even if you are in the Overworld. Without a height (`~`) your own height is used. Shift+click still puts the message into the chat input. This works on Fabric, Forge and NeoForge from Minecraft 1.16 and on Forge 1.8.9–1.12.2, only on your PC – nothing is sent. It belongs to "Clickable coordinates" in the Chat Improvements module.
+- **TRS Client: share your waypoints for Xaero's Minimap and JourneyMap.** The right-click menu of a waypoint (world map and waypoint list) and of a free spot on the world map has two new entries: "Post for Xaero's Minimap" and "Post for JourneyMap". They post the waypoint in the game chat in that mod's format, with name, colour, letters and dimension, so friends with Xaero's Minimap or JourneyMap can add it with one click – and other TRS Client users too. "Post in game chat" and "Send to a friend" stay as they are.
+
+### Deutsch
+
+- **TRS Client: Wegpunkte von Xaero's Minimap und JourneyMap im Chat.** Teilt jemand im Spiel-Chat einen Wegpunkt mit Xaero's Minimap (`xaero-waypoint:…`) oder JourneyMap (`[name:…, x:…, z:…]`, VoxelMap schreibt dasselbe), unterstreicht der TRS Client ihn jetzt – auch wenn du den Mod nicht hast. Zeigst du darauf, siehst du Name, Mod, Position und Dimension. Ein Klick öffnet „Als Wegpunkt speichern“ mit Name, Farbe und Kürzel schon ausgefüllt und speichert den Wegpunkt in seiner eigenen Dimension – ein Nether-Wegpunkt bleibt im Nether, auch wenn du in der Oberwelt bist. Ohne Höhe (`~`) wird deine eigene Höhe genommen. Umschalt+Klick setzt die Nachricht wie bisher ins Eingabefeld. Das geht auf Fabric, Forge und NeoForge ab Minecraft 1.16 und auf Forge 1.8.9–1.12.2, nur auf deinem PC – gesendet wird nichts. Es gehört zu „Koordinaten anklickbar“ im Modul „Chat-Verbesserungen“.
+- **TRS Client: eigene Wegpunkte für Xaero's Minimap und JourneyMap teilen.** Das Rechtsklick-Menü eines Wegpunkts (Weltkarte und Wegpunkt-Liste) und einer freien Stelle auf der Weltkarte hat zwei neue Einträge: „Für Xaero's Minimap teilen“ und „Für JourneyMap teilen“. Sie posten den Wegpunkt im Format des jeweiligen Mods mit Name, Farbe, Kürzel und Dimension in den Spiel-Chat, sodass Freunde mit Xaero's Minimap oder JourneyMap ihn mit einem Klick übernehmen können – und andere TRS-Client-Nutzer auch. „Im Chat teilen“ und „An Freunde schicken“ bleiben, wie sie sind.
+
 ## 0.33.0 – 2026-11-05 – Find Your Way | Weg gefunden
 <!-- banner: accent=#41cd62 motif=/news/0.33.0/banner.png -->
 <!-- shots:
