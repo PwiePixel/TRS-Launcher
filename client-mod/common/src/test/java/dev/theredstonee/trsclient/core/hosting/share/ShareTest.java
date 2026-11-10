@@ -352,6 +352,37 @@ class ShareTest {
 	}
 
 	@Test
+	void rejectedGuestSeesNotAllowedEvenIfTheHostClosedFirst() throws Exception {
+		Guests access = new Guests();
+		FileServer server = new FileServer(access);
+		Map<String, FileServer.Entry> allow = new HashMap<String, FileServer.Entry>();
+		allow.put(rep('a', 64), new FileServer.Entry(FileChannel.KIND_MOD, java.nio.file.Paths.get("x.jar"), 1, 0, rep('a', 64)));
+		server.share(allow);
+		SharePipe[] pipe = SharePipe.pair(PeerStream.Path.RELAY);
+		final FileServer s = server;
+		FileChannel.route(pipe[1], new FileChannel.Route() {
+			@Override
+			public void minecraft(PeerStream stream) {
+				stream.close("test");
+			}
+
+			@Override
+			public void files(PeerStream stream) {
+				s.serve(stream, "fremd");
+			}
+		});
+		try (FileClient fc = new FileClient(pipe[0])) {
+			// Host weist sofort ab und schließt – die Anfrage des Gasts kommt erst danach.
+			long end = System.currentTimeMillis() + 5_000L;
+			while (pipe[0].isOpen() && System.currentTimeMillis() < end) Thread.sleep(5);
+			assertFalse(pipe[0].isOpen());
+			FileClient.FileException ex = assertThrows(FileClient.FileException.class,
+					() -> fc.fetch(FileChannel.KIND_MOD, rep('a', 64), 1, 100, null, new ByteArrayOutputStream(), null));
+			assertEquals("not_allowed", ex.code);
+		}
+	}
+
+	@Test
 	void fileChannelServesOnlyTheAllowlist(@TempDir Path dir) throws Exception {
 		byte[] data = new byte[200_000];
 		new java.util.Random(7).nextBytes(data);

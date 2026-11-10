@@ -187,6 +187,11 @@ public final class FileChannel {
 			return reason;
 		}
 
+		/** Liegen schon empfangene, noch nicht gelesene Bytes bereit (auch nach dem Schließen)? */
+		public synchronized boolean hasData() {
+			return (head != null && headPos < head.length) || !queue.isEmpty();
+		}
+
 		private synchronized boolean fill() throws IOException {
 			long end = System.currentTimeMillis() + timeoutMs;
 			while ((head == null || headPos >= head.length) && queue.isEmpty()) {

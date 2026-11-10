@@ -48,7 +48,24 @@ public final class FileClient implements AutoCloseable {
 		this.stream = stream;
 		in.timeout(45_000L);
 		stream.start(in);
-		if (!stream.write(FileChannel.MAGIC, 0, FileChannel.MAGIC.length)) throw new FileException("closed");
+		if (!stream.write(FileChannel.MAGIC, 0, FileChannel.MAGIC.length)) throw closed();
+	}
+
+	/**
+	 * Schreiben scheiterte, weil der Strom zu ist. Hat der Host vorher noch einen Fehler geschickt (z. B. {@code
+	 * not_allowed} direkt nach der Magie), zählt dieser – sonst {@code closed}.
+	 */
+	private FileException closed() {
+		if (in.hasData()) {
+			in.timeout(2_000L);
+			try {
+				FileChannel.Frame f = FileChannel.read(in, 1024);
+				if (f.type == FileChannel.ERROR) return new FileException(FileChannel.safeCode(f.text()));
+			} catch (IOException ignored) {
+				// kein vollständiger Fehler-Rahmen
+			}
+		}
+		return new FileException("closed");
 	}
 
 	/**
@@ -60,7 +77,7 @@ public final class FileClient implements AutoCloseable {
 		byte[] want = FileChannel.unhex(expectedSha256);
 		if (want == null || want.length != 32) throw new FileException("bad_request");
 		byte[] req = FileChannel.get(kind, want);
-		if (!stream.write(req, 0, req.length)) throw new FileException("closed");
+		if (!stream.write(req, 0, req.length)) throw closed();
 		FileChannel.Frame f = FileChannel.read(in, 1024);
 		if (f.type == FileChannel.ERROR) throw new FileException(FileChannel.safeCode(f.text()));
 		if (f.type != FileChannel.FILE || f.payload.length != 8) throw new FileException("bad_request");
