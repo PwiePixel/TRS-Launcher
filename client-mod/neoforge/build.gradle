@@ -191,8 +191,8 @@ tasks.withType(JavaCompile).configureEach {
 sourceSets {
 	main.java.srcDir(rootProject.file('../common/src/main/java'))
 	main.resources.srcDir(rootProject.file('../common/src/main/resources'))
-	test.java.srcDir(rootProject.file('../common/src/test/java'))
 }
+apply from: new File(buildscript.sourceFile.parentFile, '../gradle/common-tests.gradle')
 
 repositories {
 	mavenCentral()

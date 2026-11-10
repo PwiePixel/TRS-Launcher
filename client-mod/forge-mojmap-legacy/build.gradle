@@ -36,7 +36,7 @@ sourceSets.main.resources.srcDir(rootProject.file('../common/src/main/resources'
 // Die Unit-Tests von common laufen einmal (mit der neuesten Version dieses Baums).
 def runsCommonTests = mc == '1.19.4'
 if (runsCommonTests) {
-	sourceSets.test.java.srcDir(rootProject.file('../common/src/test/java'))
+	apply from: new File(buildscript.sourceFile.parentFile, '../gradle/common-tests.gradle')
 }
 
 loom {
