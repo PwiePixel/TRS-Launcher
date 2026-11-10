@@ -1,0 +1,175 @@
+name: TRS Client release
+
+# Baut alle TRS-Client-Jars (alle Loader und Minecraft-Versionen, wie collectLauncherJars für den Launcher) samt
+# Unit-Tests und legt daraus einen GitHub-Release an: Tag „trsclient-<version>“, Text aus „## Unreleased“ in
+# CHANGELOG.md, alle Jars + builds*.json als Dateien. Gedacht für Forks und Vorab-Versionen zum Ausprobieren:
+#
+#   Actions → „TRS Client release“ → Run workflow → version z. B. 0.25.1+map-sharing
+#
+# Das ist NICHT der Launcher-Release (release.yml, Tags v*) und NICHT der signierte Update-Kanal des TRS Clients
+# (scripts/publish-client-mod.mjs) – nichts davon wird angefasst, der Launcher installiert diese Jars nicht selbst.
+# Braucht keine Secrets: nur das eingebaute GITHUB_TOKEN (contents: write im Job „publish“).
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version in den Jars (mod_version), z. B. 0.25.1+map-sharing – Tag wird trsclient-0.25.1-map-sharing"
+        required: true
+      prerelease:
+        description: "Als Vorab-Release (pre-release) markieren"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: client-mod-release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build all TRS Client jars
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    env:
+      VERSION: ${{ inputs.version }}
+      # Toolchains aus setup-java statt Download (foojay bleibt Rückfall) – wie in ci.yml.
+      GRADLE_TOOLCHAINS: -Porg.gradle.java.installations.fromEnv=JAVA_HOME_8_X64,JAVA_HOME_17_X64,JAVA_HOME_21_X64,JAVA_HOME_25_X64
+    steps:
+      - name: Check version
+        run: |
+          set -euo pipefail
+          # Nur Zeichen, die in mod_version, Dateinamen und Tags gefahrlos sind; „v…“ wäre ein Launcher-Tag.
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::version '$VERSION' must look like 0.25.1 or 0.25.1+map-sharing"; exit 1
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      # Alle Minecraft-Versionen dekompilieren braucht weit über 30 GB: vorinstallierte, hier unnötige SDKs entfernen.
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+          df -h /
+
+      # 8: Legacy-Forge, 17/21: Fabric/Forge bis 1.21.11, 25: 26.x und Gradle selbst (RetroFuturaGradle braucht 25).
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: |
+            8
+            17
+            21
+            25
+
+      # Kein Gradle-Cache: der Stand aller Versionen ist viel zu groß zum Speichern.
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-disabled: true
+
+      # Projekte nacheinander (wie scripts/publish-client-mod.mjs es erwartet); danach jeweils die Caches dieses
+      # Projekts löschen, damit der Platz reicht. Maven Central antwortet bei so vielen Abrufen gelegentlich mit 429.
+      - name: Build and test (Fabric, Forge, NeoForge, Legacy Forge)
+        working-directory: client-mod
+        run: |
+          set -uo pipefail
+          build() { # <ordner> <gradle-argumente…>
+            local dir=$1; shift
+            for attempt in 1 2 3 4 5 6; do
+              echo "::group::$dir (Versuch $attempt)"
+              (cd "$dir" && ./gradlew --no-daemon $GRADLE_TOOLCHAINS "-Pmod_version=$VERSION" "$@") 2>&1 | tee "$RUNNER_TEMP/build.log"
+              local status=${PIPESTATUS[0]}
+              echo "::endgroup::"
+              [ "$status" -eq 0 ] && return 0
+              grep -q "status code 429" "$RUNNER_TEMP/build.log" || { echo "::error::$dir failed"; return 1; }
+              echo "Maven Central: 429 – neuer Versuch in 120 s"; sleep 120
+            done
+            echo "::error::$dir: Maven Central answered 429 too often"; return 1
+          }
+          cleanup() { rm -rf "$@"; df -h / | tail -1; }
+
+          build . :common:test collectLauncherJars || exit 1
+          cleanup fabric/versions/*/build ~/.gradle/caches/fabric-loom/1.* ~/.gradle/caches/fabric-loom/2*
+          build forge collectLauncherJars || exit 1
+          cleanup forge/versions/*/build ~/.gradle/caches/minecraftforge
+          # Jede Dekompilierung startet eine eigene JVM mit 4 GB – parallel reicht der Speicher nicht.
+          build neoforge --max-workers=1 collectLauncherJars || exit 1
+          cleanup neoforge/versions/*/build ~/.gradle/caches/neoformruntime
+          for dir in legacy legacy-1.7.10 forge-1.13.2 forge-mojmap-legacy; do
+            build "$dir" collectLauncherJars || exit 1
+          done
+          ls dist
+
+      - name: Check jars
+        working-directory: client-mod/dist
+        run: |
+          set -euo pipefail
+          node -e '
+            const fs = require("fs");
+            const listed = fs.readdirSync(".").filter(f => /^builds.*\.json$/.test(f))
+              .flatMap(f => JSON.parse(fs.readFileSync(f, "utf8"))).map(b => b.file);
+            const jars = fs.readdirSync(".").filter(f => f.endsWith(".jar"));
+            const missing = listed.filter(f => !jars.includes(f));
+            console.log(`${jars.length} jars, ${listed.length} builds`);
+            if (missing.length || !jars.length) { console.error("missing:", missing); process.exit(1); }'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: trsclient-jars
+          path: |
+            client-mod/dist/*.jar
+            client-mod/dist/builds*.json
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish release
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ inputs.version }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: trsclient-jars
+          path: dist
+
+      - name: Release notes from CHANGELOG.md (## Unreleased)
+        run: |
+          set -euo pipefail
+          {
+            echo "> TRS Client \`$VERSION\` – built from \`${GITHUB_SHA::7}\` in ${GITHUB_REPOSITORY}. Not delivered by the launcher's auto-updater."
+            echo "> To try it: in the TRS Launcher turn **TRS Client** off in the instance settings (Installation), then put the matching \`trsclient-<loader>-<minecraft>.jar\` into the instance's \`mods\` folder (Fabric also needs the Fabric API)."
+            echo ">"
+            echo "> Zum Ausprobieren: im TRS Launcher in den Instanz-Einstellungen (Installation) **TRS Client** ausschalten, dann die passende \`trsclient-<loader>-<minecraft>.jar\` in den \`mods\`-Ordner der Instanz legen (Fabric braucht zusätzlich die Fabric API)."
+            echo
+            awk '/^## Unreleased/{p=1;next} /^## /{p=0} p' CHANGELOG.md
+          } > release-notes.md
+          if ! grep -q '^### English' release-notes.md || ! grep -q '^### Deutsch' release-notes.md; then
+            echo "::error::CHANGELOG.md has no English and German points under '## Unreleased'"; exit 1
+          fi
+          cat release-notes.md
+
+      - name: Create release
+        run: |
+          set -euo pipefail
+          tag="trsclient-${VERSION//+/-}"
+          if gh release view "$tag" > /dev/null 2>&1; then
+            echo "::error::Release $tag already exists – delete it or pick another version"; exit 1
+          fi
+          flags=()
+          [ "${{ inputs.prerelease }}" = "true" ] && flags+=(--prerelease)
+          gh release create "$tag" --target "$GITHUB_SHA" --title "TRS Client $VERSION" \
+            --notes-file release-notes.md "${flags[@]}" dist/*.jar dist/builds*.json
+          echo "Release: $(gh release view "$tag" --json url --jq .url)" >> "$GITHUB_STEP_SUMMARY"

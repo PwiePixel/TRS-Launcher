@@ -253,9 +253,12 @@ jobs:
 
   # iOS: Clippy für das Gerät und ein unsigniertes IPA (Archiv ohne Code-Signatur). Das Xcode-Projekt entsteht hier
   # mit `tauri ios init` (unter Windows nicht erzeugbar); signiert wird später von AltStore/SideStore beim Installieren.
+  # Nur im Original-Repo: In Forks bekamen die macOS-Jobs oft keinen Runner und wurden nach 15 Minuten in der
+  # Warteschlange abgebrochen – dann wäre „ci-ok“ rot, ohne dass etwas kaputt ist. Ein Fork mit Mac-Runnern schaltet
+  # sie mit der Repo-Variable TRS_MACOS_CI=true wieder ein. „ios-engine“ hängt hiervon ab und entfällt mit.
   launcher-ios:
     needs: changes
-    if: needs.changes.outputs.mobile == 'true'
+    if: needs.changes.outputs.mobile == 'true' && (github.repository == 'theredstonee/TRS-Launcher' || vars.TRS_MACOS_CI == 'true')
     runs-on: macos-latest
     timeout-minutes: 90
     env:
