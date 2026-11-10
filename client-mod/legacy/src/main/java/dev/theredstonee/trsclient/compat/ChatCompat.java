@@ -96,7 +96,8 @@ public final class ChatCompat {
 
 	/**
 	 * Koordinaten in der Nachricht unterstreichen, als Einfüge-Text „x y z“ markieren und mit Hinweis versehen (nur
-	 * Textstücke ohne eigene Klick-/Einfüge-Aktion). Rückgabe: geändert?
+	 * Textstücke ohne eigene Klick-/Einfüge-Aktion); geteilte Wegpunkte von Xaero's Minimap/JourneyMap bekommen die
+	 * Nachricht als Einfüge-Text und einen eigenen Hinweis ({@link ChatCoords.Hit#hover}). Rückgabe: geändert?
 	 */
 	public static boolean markCoords(ClientChatReceivedEvent event, String hoverText) {
 		//? if >=1.9 {
@@ -117,7 +118,7 @@ public final class ChatCompat {
 				mark.setUnderlined(true);
 				mark.setInsertion(h.insertion());
 				mark.setHoverEvent(new net.minecraft.util.text.event.HoverEvent(net.minecraft.util.text.event.HoverEvent.Action.SHOW_TEXT,
-						new TextComponentString(hoverText)));
+						new TextComponentString(h.hover(hoverText))));
 				out.appendSibling(new TextComponentString(text.substring(h.start, h.end)).setStyle(mark));
 				pos = h.end;
 				changed = true;
@@ -144,7 +145,7 @@ public final class ChatCompat {
 				mark.setUnderlined(true);
 				mark.setInsertion(h.insertion());
 				mark.setChatHoverEvent(new net.minecraft.event.HoverEvent(net.minecraft.event.HoverEvent.Action.SHOW_TEXT,
-						new ChatComponentText(hoverText)));
+						new ChatComponentText(h.hover(hoverText))));
 				out.appendSibling(new ChatComponentText(text.substring(h.start, h.end)).setChatStyle(mark));
 				pos = h.end;
 				changed = true;
@@ -284,7 +285,7 @@ public final class ChatCompat {
 				style.setUnderlined(true);
 				style.setInsertion(h.insertion());
 				style.setHoverEvent(new net.minecraft.util.text.event.HoverEvent(
-						net.minecraft.util.text.event.HoverEvent.Action.SHOW_TEXT, new TextComponentString(hover)));
+						net.minecraft.util.text.event.HoverEvent.Action.SHOW_TEXT, new TextComponentString(h.hover(hover))));
 				out.appendSibling(new TextComponentString(formatted.substring(start, end)).setStyle(style));
 			}
 			plain = h.end;
@@ -310,7 +311,7 @@ public final class ChatCompat {
 				style.setUnderlined(true);
 				style.setInsertion(h.insertion());
 				style.setChatHoverEvent(new net.minecraft.event.HoverEvent(net.minecraft.event.HoverEvent.Action.SHOW_TEXT,
-						new ChatComponentText(hover)));
+						new ChatComponentText(h.hover(hover))));
 				out.appendSibling(new ChatComponentText(formatted.substring(start, end)).setChatStyle(style));
 			}
 			plain = h.end;
