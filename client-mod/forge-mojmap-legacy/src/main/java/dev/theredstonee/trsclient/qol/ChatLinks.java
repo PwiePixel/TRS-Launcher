@@ -61,7 +61,8 @@ public final class ChatLinks {
 		if (message == null) return null;
 		try {
 			TrsModules m = modules();
-			boolean coords = coordsOn(m) && !ChatCoords.find(message.getString()).isEmpty();
+			// Koordinaten bzw. geteilte Wegpunkte im Text – oder Xaeros eigene Zeile mit „[Add]“ (Xaero's Minimap installiert).
+			boolean coords = coordsOn(m) && (!ChatCoords.find(message.getString()).isEmpty() || hasSharedClick(message));
 			String shot = screenshotName(message);
 			if (!coords && shot == null) return message;
 			MutableComponent out = coords ? withCoords(message) : message.copy();
@@ -86,12 +87,17 @@ public final class ChatLinks {
 	}
 
 	//? if >=1.16 {
-	// Koordinaten in Textstücken ohne eigene Klick-/Einfüge-Aktion unterstreichen und markieren.
+	// Koordinaten in Textstücken ohne eigene Klick-/Einfüge-Aktion unterstreichen und markieren. Geteilte Wegpunkte von
+	// Xaero's Minimap/JourneyMap: statt der Rohnachricht „… shared a waypoint called “Dorf” from Nether! [Add] · Xaero's
+	// Minimap“. Hat Xaero die Zeile schon selbst gebaut (sein „[Add]“ führt /xaero_waypoint_add:… aus), kommt
+	// „[Zu TRS hinzufügen]“ dahinter.
 	private static MutableComponent withCoords(Component message) {
 		final MutableComponent out = QolText.literal("");
 		final String hoverText = I18n.tr("chat.coords.hover");
+		final ChatWaypoints.Shared[] fromMod = {null};
 		message.visit((FormattedText.StyledContentConsumer<Object>) (style, text) -> {
 			if (text.isEmpty()) return Optional.empty();
+			if (fromMod[0] == null) fromMod[0] = ChatWaypoints.fromClickCommand(clickText(style.getClickEvent()));
 			List<ChatCoords.Hit> hits = style.getClickEvent() == null && style.getInsertion() == null ? ChatCoords.find(text)
 					: Collections.<ChatCoords.Hit>emptyList();
 			if (hits.isEmpty()) {
@@ -101,14 +107,53 @@ public final class ChatLinks {
 			int pos = 0;
 			for (ChatCoords.Hit h : hits) {
 				if (h.start > pos) out.append(QolText.literal(ChatText.activeCodes(text.substring(0, pos)) + text.substring(pos, h.start)).setStyle(style));
-				Style mark = style.withUnderlined(true).withInsertion(h.insertion()).withHoverEvent(hover(h.hover(hoverText)));
-				out.append(QolText.literal(ChatText.activeCodes(text.substring(0, h.start)) + text.substring(h.start, h.end)).setStyle(mark));
+				String codes = ChatText.activeCodes(text.substring(0, h.start));
+				if (h.shared != null) {
+					for (ChatWaypoints.Part p : ChatWaypoints.display(h.shared)) out.append(part(p, style, codes));
+				} else {
+					Style mark = style.withUnderlined(true).withInsertion(h.insertion()).withHoverEvent(hover(h.hover(hoverText)));
+					out.append(QolText.literal(codes + text.substring(h.start, h.end)).setStyle(mark));
+				}
 				pos = h.end;
 			}
 			if (pos < text.length()) out.append(QolText.literal(ChatText.activeCodes(text.substring(0, pos)) + text.substring(pos)).setStyle(style));
 			return Optional.empty();
 		}, Style.EMPTY);
+		if (fromMod[0] != null) out.append(part(ChatWaypoints.trsAddButton(fromMod[0]), Style.EMPTY, ""));
 		return out;
+	}
+
+	// Ein Stück der Wegpunkt-Darstellung: Text und Name im Stil der Nachricht (Name unterstrichen, Klick = Fenster),
+	// „[Add]“ grün unterstrichen (Klick = sofort speichern), Mod-Name grau.
+	private static MutableComponent part(ChatWaypoints.Part p, Style base, String codes) {
+		Style st;
+		switch (p.kind) {
+			case NAME:
+				st = base.withUnderlined(true);
+				break;
+			case ADD:
+				st = Style.EMPTY.applyFormat(ChatFormatting.GREEN).withUnderlined(true);
+				break;
+			case MOD:
+				st = Style.EMPTY.applyFormat(ChatFormatting.GRAY);
+				break;
+			default:
+				st = base;
+		}
+		if (p.insertion != null) st = st.withInsertion(p.insertion);
+		if (p.hover != null) st = st.withHoverEvent(hover(p.hover));
+		boolean own = p.kind == ChatWaypoints.Part.Kind.ADD || p.kind == ChatWaypoints.Part.Kind.MOD;
+		return QolText.literal((own ? "" : codes) + p.text).setStyle(st);
+	}
+
+	// Gibt es in der Zeile einen Klick, der einen geteilten Wegpunkt hinzufügt (Xaeros „[Add]“)?
+	private static boolean hasSharedClick(Component message) {
+		final boolean[] found = {false};
+		message.visit((FormattedText.StyledContentConsumer<Object>) (style, text) -> {
+			if (!found[0] && ChatWaypoints.fromClickCommand(clickText(style.getClickEvent())) != null) found[0] = true;
+			return Optional.empty();
+		}, Style.EMPTY);
+		return found[0];
 	}
 
 	// Bildschirmfoto-Zeile: Stil mit „Datei öffnen“ auf eine Datei unter screenshots/ → relativer Name, sonst null.
@@ -135,6 +180,13 @@ public final class ChatLinks {
 		if (ins == null) return false;
 		try {
 			boolean coords = coordsOn(modules());
+			// „[Add]“ bzw. „[Zu TRS hinzufügen]“: sofort auf die Karte, Hinweis in der Aktionsleiste.
+			ChatWaypoints.Shared add = coords ? ChatWaypoints.parseAddMarker(ins) : null;
+			if (add != null) {
+				saveHost().playClick();
+				notice(dev.theredstonee.trsclient.core.waypoint.WaypointShare.addShared(add));
+				return true;
+			}
 			ChatWaypoints.Shared shared = coords ? ChatWaypoints.parse(ins) : null;
 			if (shared != null) {
 				openSave(shared);
@@ -193,12 +245,25 @@ public final class ChatLinks {
 		return e instanceof ClickEvent.OpenFile ? ((ClickEvent.OpenFile) e).path() : null;
 	}
 
+	// Text eines Befehls-Klicks (andere Mods, z. B. Xaeros „[Add]“), sonst null.
+	private static String clickText(ClickEvent e) {
+		if (e instanceof ClickEvent.RunCommand) return ((ClickEvent.RunCommand) e).command();
+		if (e instanceof ClickEvent.SuggestCommand) return ((ClickEvent.SuggestCommand) e).command();
+		return null;
+	}
+
 	private static HoverEvent hover(String text) {
 		return new HoverEvent.ShowText(QolText.literal(text));
 	}
 	*///?} elif >=1.16 {
 	private static String openFile(ClickEvent e) {
 		return e != null && e.getAction() == ClickEvent.Action.OPEN_FILE ? e.getValue() : null;
+	}
+
+	// Text eines Befehls-Klicks (andere Mods, z. B. Xaeros „[Add]“), sonst null.
+	private static String clickText(ClickEvent e) {
+		return e != null && (e.getAction() == ClickEvent.Action.RUN_COMMAND || e.getAction() == ClickEvent.Action.SUGGEST_COMMAND)
+				? e.getValue() : null;
 	}
 
 	private static HoverEvent hover(String text) {

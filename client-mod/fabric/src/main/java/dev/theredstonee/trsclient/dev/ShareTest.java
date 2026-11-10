@@ -163,7 +163,7 @@ public final class ShareTest {
 				}
 				// Wegpunkte von Xaero's Minimap und JourneyMap: Klick → Fenster mit Name/Farbe (Bild) → in ihrer Dimension
 				// speichern. Ein Unterschritt je Tick-Pause, damit das Fenster vor dem Bild gezeichnet ist.
-				if (mapModStep < 4) {
+				if (mapModStep < 5) {
 					mapModStep(mc);
 					wait = 10;
 					return;
@@ -300,8 +300,10 @@ public final class ShareTest {
 	/** Geteilter Wegpunkt von Xaero's Minimap bzw. JourneyMap im Chat. */
 	private static final String XAERO_LINE = "xaero-waypoint:Dorf:D:-1500:~:900:6:false:0:Internal-the-nether";
 	private static final String JOURNEYMAP_LINE = "[name:\"Turm\", x:40, y:90, z:-60, dim:minecraft:overworld]";
+	/** Dritter Wegpunkt: direkt über „[Add]“ speichern (ohne Fenster). */
+	private static final String XAERO_ADD_LINE = "xaero-waypoint:Mine:M:300:12:-80:2:false:0:Internal-overworld";
 
-	/** Phase 6, Unterschritte: Xaero anklicken, Bild + speichern, JourneyMap anklicken, Bild + speichern. */
+	/** Phase 6, Unterschritte: Xaero anklicken, Bild + speichern, JourneyMap anklicken, Bild + speichern, „[Add]“. */
 	private void mapModStep(Minecraft mc) {
 		switch (mapModStep++) {
 			case 0:
@@ -314,9 +316,12 @@ public final class ShareTest {
 			case 2:
 				openMapModShare(JOURNEYMAP_LINE);
 				break;
-			default:
+			case 3:
 				shot(mc, "save-journeymap");
 				saveMapModShare("Turm", "minecraft:overworld");
+				break;
+			default:
+				addMapModShare(XAERO_ADD_LINE, "Mine", "minecraft:overworld");
 		}
 	}
 
@@ -327,6 +332,19 @@ public final class ShareTest {
 		WaypointSaveUi ui = saveUi(Mc.screen());
 		log("Karten-Mod-Wegpunkt: Klick " + clicked + ", Fenster " + (ui != null)
 				+ (ui == null ? "" : ", Name " + ui.testName() + ", Farbe " + Integer.toHexString(ui.testColor())));
+	}
+
+	/** „[Add]“ in der geschmückten Zeile anklicken: ohne Fenster gespeichert, in der Dimension der Nachricht? */
+	private static void addMapModShare(String line, String name, String dimension) {
+		Component decorated = dev.theredstonee.trsclient.qol.ChatLinks.decorate(Mc.text("<Bob> " + line));
+		boolean clicked = clickInsertion(decorated, "trs-waypoint-add:");
+		boolean window = saveUi(Mc.screen()) != null;
+		boolean saved = false;
+		for (Waypoint w : dev.theredstonee.trsclient.core.map.MapEngine.get().allWaypoints()) {
+			if (w.name.equals(name) && dimension.equals(WaypointShare.canonicalDimension(w.dimension))) saved = true;
+		}
+		log("Karten-Mod-Wegpunkt per [Add]: Klick " + clicked + ", Zeile „" + decorated.getString() + "“, Fenster " + window
+				+ ", " + name + " gespeichert (" + dimension + "): " + saved);
 	}
 
 	/** Offenes Fenster speichern – liegt der Wegpunkt danach in der Dimension der Nachricht? */

@@ -316,6 +316,20 @@ public final class WaypointShare {
 		return r;
 	}
 
+	/**
+	 * „[Add]“ an einem geteilten Wegpunkt von Xaero's Minimap/JourneyMap im Chat: sofort speichern, ohne Fenster – mit
+	 * Name, Farbe, Kürzel und Dimension der Nachricht, ohne Höhe die des Spielers. Nur lokal. Rückgabe: Hinweis für die
+	 * Aktionsleiste („Wegpunkt „Dorf“ gespeichert“, „… hast du schon“, „keine Welt“ …).
+	 */
+	public static String addShared(dev.theredstonee.trsclient.core.chat.ChatWaypoints.Shared s) {
+		String name = dev.theredstonee.trsclient.core.social.SafeText.line(
+				dev.theredstonee.trsclient.core.chat.ChatWaypoints.displayName(s), dev.theredstonee.trsclient.core.social.SafeText.MAX_NAME);
+		if (name == null || name.isEmpty()) name = dev.theredstonee.trsclient.core.i18n.I18n.tr("waypoint.save.defaultName");
+		Result r = saveShared(name, s.x, s.hasY ? s.y : playerBlockY(), s.z, s.dimension, s.color, s.mark);
+		return r == Result.ADDED || r == Result.ALREADY ? dev.theredstonee.trsclient.core.i18n.I18n.tr(r.key(), name)
+				: dev.theredstonee.trsclient.core.i18n.I18n.tr(r.key());
+	}
+
 	/** Blockhöhe der Füße des Spielers (für geteilte Wegpunkte ohne Höhe), 64 ohne Welt. */
 	public static int playerBlockY() {
 		MapPlatform p = platform();
