@@ -2709,6 +2709,7 @@
   "setting.waypoints.labels.never": "Nooit",
   "setting.waypoints.deathKeep": "Sterfpunten bewaren",
   "setting.waypoints.deathGuide": "Terugweg: sterfpunt wordt je doel",
+  "setting.waypoints.deathRemove": "Sterfpunt verwijderen bij aankomst",
   "setting.waypoints.teleport": "Teleport-items (alleen met rechten)",
   "setting.waypoints.sort": "Volgorde van de lijst",
   "setting.waypoints.sort.distance": "Afstand",
