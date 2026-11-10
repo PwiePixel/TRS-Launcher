@@ -53,7 +53,7 @@ public final class ChatFeatures {
 		dev.theredstonee.trsclient.core.cinematic.Cinematic.serverText(ChatCompat.formatted(event));
 		long now = System.currentTimeMillis();
 		// Koordinaten anklickbar machen („Als Wegpunkt speichern“, nur lokal).
-		if (modules.chat.isEnabled() && modules.chatCoordLinks.get() && !ChatCoords.find(plain).isEmpty()) {
+		if (modules.chat.isEnabled() && modules.chatCoordLinks.get() && (!ChatCoords.find(plain).isEmpty() || ChatCompat.hasSharedClick(event))) {
 			try {
 				ChatCompat.markCoords(event, I18n.tr("chat.coords.hover"));
 			} catch (RuntimeException e) {
@@ -91,7 +91,8 @@ public final class ChatFeatures {
 		if (rewrite) {
 			int id = nextId++;
 			boolean printed;
-			if (modules.qol.chatHeads.isEnabled()) {
+			// Mit „[Add]“-Knopf (geteilter Wegpunkt) nicht umbrechen: das verlöre den Knopf – dann ohne Einrückung.
+			if (modules.qol.chatHeads.isEnabled() && !ChatCompat.hasWaypointButton(event)) {
 				String hover = modules.chat.isEnabled() && modules.chatCoordLinks.get() ? I18n.tr("chat.coords.hover") : null;
 				printed = ChatCompat.reprintIndented(event, prefix, suffix, id, hover);
 			} else {
@@ -175,6 +176,13 @@ public final class ChatFeatures {
 		if (!modules.chat.isEnabled() || !modules.chatCoordLinks.get()) return false;
 		try {
 			String insertion = ChatCompat.insertionAt(rawMouseX, rawMouseY);
+			// „[Add]“ bzw. „[Zu TRS hinzufügen]“: sofort auf die Karte, Hinweis in der Aktionsleiste.
+			ChatWaypoints.Shared add = ChatWaypoints.parseAddMarker(insertion);
+			if (add != null) {
+				saveHost().playClick();
+				saveHost().notice(dev.theredstonee.trsclient.core.waypoint.WaypointShare.addShared(add));
+				return true;
+			}
 			ChatWaypoints.Shared shared = ChatWaypoints.parse(insertion);
 			if (shared != null) {
 				openSave(new dev.theredstonee.trsclient.core.ui.WaypointSaveUi(saveHost(), shared));

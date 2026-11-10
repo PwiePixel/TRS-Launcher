@@ -275,4 +275,80 @@ class ChatWaypointsTest {
 		ChatCoords.Hit plain = ChatCoords.find("100 64 -20").get(0);
 		assertEquals("coords", plain.hover("coords"));
 	}
+
+	private static String joined(List<ChatWaypoints.Part> parts) {
+		StringBuilder b = new StringBuilder();
+		for (ChatWaypoints.Part p : parts) b.append(p.text);
+		return b.toString();
+	}
+
+	@Test
+	void displayLooksLikeXaeroWithAddButtonAndModAtTheEnd() {
+		I18n.use("en");
+		ChatWaypoints.Shared s = ChatWaypoints.parse("xaero-waypoint:Dorf:D:-1500:~:900:6:false:0:Internal-the-nether");
+		List<ChatWaypoints.Part> parts = ChatWaypoints.display(s);
+		assertEquals("shared a waypoint called “Dorf” from Nether! [Add] · Xaero's Minimap", joined(parts));
+		// Name: Klick öffnet das Fenster (Einfüge-Text = Nachricht), „[Add]“: sofort speichern, Mod-Name zuletzt.
+		ChatWaypoints.Part name = parts.get(1);
+		assertEquals(ChatWaypoints.Part.Kind.NAME, name.kind);
+		assertEquals("Dorf", name.text);
+		assertEquals(s.text, name.insertion);
+		ChatWaypoints.Part add = parts.get(parts.size() - 2);
+		assertEquals(ChatWaypoints.Part.Kind.ADD, add.kind);
+		assertTrue(ChatWaypoints.isAddMarker(add.insertion));
+		assertTrue(add.hover.contains("Dorf") && add.hover.contains("-1500 ~ 900"), add.hover);
+		assertEquals(ChatWaypoints.Part.Kind.MOD, parts.get(parts.size() - 1).kind);
+		ChatWaypoints.Shared back = ChatWaypoints.parseAddMarker(add.insertion);
+		assertNotNull(back);
+		assertEquals("Dorf", back.name);
+		assertEquals("minecraft:the_nether", back.dimension);
+		// Der Name ist kein „[Add]“, ein „[Add]“ kein Name.
+		assertNull(ChatWaypoints.parseAddMarker(name.insertion));
+		assertNull(ChatWaypoints.parse(add.insertion));
+	}
+
+	@Test
+	void displayInGermanAndWithoutDimensionOrName() {
+		I18n.use("de");
+		ChatWaypoints.Shared turm = ChatWaypoints.parse("[name:\"Turm\", x:40, y:90, z:-60, dim:minecraft:overworld]");
+		assertEquals("hat einen Wegpunkt namens „Turm“ geteilt (Oberwelt)! [Hinzufügen] · JourneyMap", joined(ChatWaypoints.display(turm)));
+		ChatWaypoints.Shared bare = ChatWaypoints.parse("[x:1, z:2]");
+		assertEquals("hat einen Wegpunkt namens „Aus dem Chat“ geteilt! [Hinzufügen] · JourneyMap", joined(ChatWaypoints.display(bare)));
+		I18n.use("en");
+		assertEquals(" [Add to TRS]", ChatWaypoints.trsAddButton(turm).text);
+	}
+
+	@Test
+	void displayReplacesTheRawShareInTheLine() {
+		I18n.use("en");
+		List<ChatCoords.Hit> hits = ChatCoords.find("<Alex> xaero-waypoint:Dorf:D:-1500:~:900:6:false:0:Internal-the-nether");
+		assertEquals(1, hits.size());
+		assertEquals("<Alex> ", "<Alex> xaero-waypoint:Dorf:D:-1500:~:900:6:false:0:Internal-the-nether".substring(0, hits.get(0).start));
+	}
+
+	@Test
+	void xaerosOwnAddCommandIsReadBack() {
+		// So baut Xaero's Minimap den Klick hinter seinem „[Add]“: „/“ + xaero_waypoint_add: + die Felder der Nachricht.
+		ChatWaypoints.Shared s = ChatWaypoints.fromClickCommand("/xaero_waypoint_add:Dorf:D:-1500:~:900:6:false:0:Internal-the-nether");
+		assertNotNull(s);
+		assertEquals(ChatWaypoints.Format.XAERO, s.format);
+		assertEquals("Dorf", s.name);
+		assertEquals(-1500, s.x);
+		assertFalse(s.hasY);
+		assertEquals(900, s.z);
+		assertEquals("minecraft:the_nether", s.dimension);
+		// Maskierte Zeichen wie in der modernen Nachricht („^min^“ = „-“, „-“ = „_“).
+		ChatWaypoints.Shared esc = ChatWaypoints.fromClickCommand("/xaero_waypoint_add:Spawn^min^Hub:S:1:64:2:9:false:0:Internal-overworld");
+		assertNotNull(esc);
+		assertEquals("Spawn-Hub", esc.name);
+		assertEquals("minecraft:overworld", esc.dimension);
+		ChatWaypoints.Shared add = ChatWaypoints.parseAddMarker(ChatWaypoints.trsAddButton(s).insertion);
+		assertNotNull(add);
+		assertEquals(-1500, add.x);
+		// Andere Befehle und Links sind keine Wegpunkte.
+		assertNull(ChatWaypoints.fromClickCommand(null));
+		assertNull(ChatWaypoints.fromClickCommand("/tp 1 2 3"));
+		assertNull(ChatWaypoints.fromClickCommand("/xaero_waypoint_add:kaputt"));
+		assertNull(ChatWaypoints.fromClickCommand("https://example.org/xaero_waypoint_add:a:b:1:2:3:4"));
+	}
 }

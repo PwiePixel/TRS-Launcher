@@ -41,6 +41,12 @@ public final class ChatWaypoints {
 	private static final int XAERO_DEFAULT_COLOR = 9;
 
 	private static final String XAERO_PREFIX = "xaero-waypoint";
+	/** Befehl hinter Xaeros „[Add]“ in dessen eigener Chatzeile: {@code /xaero_waypoint_add:Name:N:x:y:z:…}. */
+	private static final String XAERO_ADD_PREFIX = "xaero_waypoint_add";
+	/** Einfüge-Text des Knopfs „[Hinzufügen]“ (davor der Marker, danach die Nachricht): sofort speichern, ohne Fenster. */
+	static final String ADD_MARKER = "trs-waypoint-add:";
+	/** Platzhalter für den Namen beim Zerlegen des übersetzten Satzes (Privatbereich, kommt in Übersetzungen nicht vor). */
+	private static final String NAME_SLOT = "";
 	/**
 	 * Präfix : Name : Kürzel : x : y|~ : z : Farbe [: Drehen [: Blickrichtung [: Ziel [: weitere Felder]]]]. Weitere Felder
 	 * (z. B. {@code :xaeroshare} anderer Mods) gehören zur Nachricht, werden aber ignoriert.
@@ -150,7 +156,9 @@ public final class ChatWaypoints {
 
 	private static Shared xaero(Matcher m, String raw) {
 		try {
-			boolean modern = m.group(1).toLowerCase(Locale.ROOT).equals(XAERO_PREFIX);
+			// „xaero_waypoint_add:“ (Xaeros eigener „[Add]“-Befehl) trägt die Felder der modernen Nachricht weiter.
+			String prefix = m.group(1).toLowerCase(Locale.ROOT);
+			boolean modern = prefix.equals(XAERO_PREFIX) || prefix.equals(XAERO_ADD_PREFIX);
 			String name = clean(modern ? xaeroUnescape(m.group(2)) : m.group(2).replace("^col^", ":"));
 			String mark = clean(modern ? xaeroUnescape(m.group(3)) : m.group(3).replace("^col^", ":"));
 			int x = Integer.parseInt(m.group(4));
@@ -355,15 +363,100 @@ public final class ChatWaypoints {
 		return dimension;
 	}
 
+	// --- Darstellung im Chat ---
+
+	/** Ein Stück der Chat-Darstellung eines geteilten Wegpunkts (der Loader baut daraus Komponenten). */
+	public static final class Part {
+		/** TEXT = normaler Text, NAME = Name (Klick: Fenster), ADD = Knopf (Klick: sofort speichern), MOD = Mod-Name. */
+		public enum Kind {
+			TEXT, NAME, ADD, MOD
+		}
+
+		public final Kind kind;
+		public final String text;
+		/** Einfüge-Text (Marker für den Klick), null = keiner. */
+		public final String insertion;
+		/** Hinweis beim Darüberfahren, null = keiner. */
+		public final String hover;
+
+		Part(Kind kind, String text, String insertion, String hover) {
+			this.kind = kind;
+			this.text = text;
+			this.insertion = insertion;
+			this.hover = hover;
+		}
+	}
+
+	/**
+	 * Anzeige statt der Rohnachricht, wie Xaero's Minimap sie zeigt: „shared a waypoint called “Dorf” from Nether!
+	 * [Add] · Xaero's Minimap“ (Text davor, z. B. „&lt;Alex&gt; “, bleibt stehen). Der Name öffnet „Als Wegpunkt
+	 * speichern“ (Einfüge-Text = die Nachricht, Umschalt-Klick fügt sie wie bisher ein), „[Add]“ speichert sofort.
+	 */
+	public static List<Part> display(Shared s) {
+		List<Part> out = new ArrayList<Part>();
+		String sentence = s.dimension != null
+				? I18n.tr("chat.waypoint.sharedFrom", NAME_SLOT, dev.theredstonee.trsclient.core.map.WorldMapUi.dimensionName(s.dimension))
+				: I18n.tr("chat.waypoint.shared", NAME_SLOT);
+		int slot = sentence.indexOf(NAME_SLOT);
+		String before = slot < 0 ? sentence + " " : sentence.substring(0, slot);
+		String after = slot < 0 ? "" : sentence.substring(slot + NAME_SLOT.length());
+		if (!before.isEmpty()) out.add(new Part(Part.Kind.TEXT, before, null, null));
+		out.add(new Part(Part.Kind.NAME, displayName(s), s.text, hover(s)));
+		if (!after.isEmpty()) out.add(new Part(Part.Kind.TEXT, after, null, null));
+		out.add(addButton(s, "chat.waypoint.add"));
+		out.add(new Part(Part.Kind.MOD, " · " + s.format.label(), null, null));
+		return out;
+	}
+
+	/** Knopf „[Zu TRS hinzufügen]“ hinter Xaeros eigener Chatzeile (wenn Xaero's Minimap selbst installiert ist). */
+	public static Part trsAddButton(Shared s) {
+		return addButton(s, "chat.waypoint.addTrs");
+	}
+
+	private static Part addButton(Shared s, String labelKey) {
+		String hover = I18n.tr("chat.waypoint.addHover", displayName(s)) + "\n" + details(s);
+		return new Part(Part.Kind.ADD, " [" + I18n.tr(labelKey) + "]", ADD_MARKER + s.text, hover);
+	}
+
+	/** Ist das der Einfüge-Text eines „[Add]“-Knopfs? */
+	public static boolean isAddMarker(String insertion) {
+		return insertion != null && insertion.startsWith(ADD_MARKER);
+	}
+
+	/** Einfüge-Text eines „[Add]“-Knopfs → der Wegpunkt; null = kein solcher Knopf. */
+	public static Shared parseAddMarker(String insertion) {
+		if (insertion == null || !insertion.startsWith(ADD_MARKER)) return null;
+		return parse(insertion.substring(ADD_MARKER.length()));
+	}
+
+	/**
+	 * Klick-Aktion eines anderen Mods als geteilter Wegpunkt – Xaeros „[Add]“ führt {@code /xaero_waypoint_add:…} aus –,
+	 * sonst null (alle anderen Befehle und Links).
+	 */
+	public static Shared fromClickCommand(String command) {
+		if (command == null) return null;
+		String c = command.trim();
+		if (c.startsWith("/")) c = c.substring(1);
+		return c.regionMatches(true, 0, XAERO_ADD_PREFIX + ":", 0, XAERO_ADD_PREFIX.length() + 1) ? parse(c) : null;
+	}
+
+	/** Name für die Anzeige (ohne Namen: „Aus dem Chat“). */
+	public static String displayName(Shared s) {
+		return s.name.isEmpty() ? I18n.tr("waypoint.save.defaultName") : s.name;
+	}
+
+	/** Mod, Position und Dimension in einer Zeile. */
+	static String details(Shared s) {
+		StringBuilder b = new StringBuilder(s.format.label()).append(" · ").append(position(s));
+		if (s.dimension != null) b.append(" · ").append(dev.theredstonee.trsclient.core.map.WorldMapUi.dimensionName(s.dimension));
+		return b.toString();
+	}
+
 	// --- Hilfen ---
 
 	/** Hinweis an der Chat-Spanne: Klick speichert „Name“; zweite Zeile Mod, Position und Dimension. */
 	public static String hover(Shared s) {
-		String name = s.name.isEmpty() ? I18n.tr("waypoint.save.defaultName") : s.name;
-		StringBuilder b = new StringBuilder(I18n.tr("chat.waypoint.hover", name));
-		b.append('\n').append(s.format.label()).append(" · ").append(position(s));
-		if (s.dimension != null) b.append(" · ").append(dev.theredstonee.trsclient.core.map.WorldMapUi.dimensionName(s.dimension));
-		return b.toString();
+		return I18n.tr("chat.waypoint.hover", displayName(s)) + "\n" + details(s);
 	}
 
 	/** „x y z“, unbekannte Höhe als „~“. */

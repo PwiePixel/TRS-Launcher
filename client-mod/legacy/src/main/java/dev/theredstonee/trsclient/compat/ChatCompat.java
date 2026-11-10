@@ -105,6 +105,7 @@ public final class ChatCompat {
 		if (original == null) return false;
 		TextComponentString out = new TextComponentString("");
 		boolean changed = false;
+		dev.theredstonee.trsclient.core.chat.ChatWaypoints.Shared fromMod = null;
 		for (ITextComponent part : original) {
 			String text = part.getUnformattedComponentText();
 			net.minecraft.util.text.Style style = part.getStyle().createDeepCopy();
@@ -112,18 +113,31 @@ public final class ChatCompat {
 					&& style.getInsertion() == null ? dev.theredstonee.trsclient.core.chat.ChatCoords.find(text)
 					: java.util.Collections.<dev.theredstonee.trsclient.core.chat.ChatCoords.Hit>emptyList();
 			int pos = 0;
+			if (fromMod == null) fromMod = dev.theredstonee.trsclient.core.chat.ChatWaypoints.fromClickCommand(clickText(style.getClickEvent()));
 			for (dev.theredstonee.trsclient.core.chat.ChatCoords.Hit h : hits) {
 				if (h.start > pos) out.appendSibling(new TextComponentString(text.substring(pos, h.start)).setStyle(style.createShallowCopy()));
-				net.minecraft.util.text.Style mark = style.createShallowCopy();
-				mark.setUnderlined(true);
-				mark.setInsertion(h.insertion());
-				mark.setHoverEvent(new net.minecraft.util.text.event.HoverEvent(net.minecraft.util.text.event.HoverEvent.Action.SHOW_TEXT,
-						new TextComponentString(h.hover(hoverText))));
-				out.appendSibling(new TextComponentString(text.substring(h.start, h.end)).setStyle(mark));
+				if (h.shared != null) {
+					// Statt der Rohnachricht: „… shared a waypoint called “Dorf” from Nether! [Add] · Xaero's Minimap“.
+					for (dev.theredstonee.trsclient.core.chat.ChatWaypoints.Part p : dev.theredstonee.trsclient.core.chat.ChatWaypoints.display(h.shared)) {
+						out.appendSibling(part(p, style));
+					}
+				} else {
+					net.minecraft.util.text.Style mark = style.createShallowCopy();
+					mark.setUnderlined(true);
+					mark.setInsertion(h.insertion());
+					mark.setHoverEvent(new net.minecraft.util.text.event.HoverEvent(net.minecraft.util.text.event.HoverEvent.Action.SHOW_TEXT,
+							new TextComponentString(h.hover(hoverText))));
+					out.appendSibling(new TextComponentString(text.substring(h.start, h.end)).setStyle(mark));
+				}
 				pos = h.end;
 				changed = true;
 			}
 			if (pos < text.length()) out.appendSibling(new TextComponentString(text.substring(pos)).setStyle(style.createShallowCopy()));
+		}
+		// Xaeros eigene Zeile („[Add]“ führt /xaero_waypoint_add:… aus): „[Zu TRS hinzufügen]“ dahinter.
+		if (fromMod != null) {
+			out.appendSibling(part(dev.theredstonee.trsclient.core.chat.ChatWaypoints.trsAddButton(fromMod), new net.minecraft.util.text.Style()));
+			changed = true;
 		}
 		if (changed) event.setMessage(out);
 		return changed;
@@ -132,6 +146,7 @@ public final class ChatCompat {
 		if (original == null) return false;
 		ChatComponentText out = new ChatComponentText("");
 		boolean changed = false;
+		dev.theredstonee.trsclient.core.chat.ChatWaypoints.Shared fromMod = null;
 		for (IChatComponent part : original) {
 			String text = part.getUnformattedTextForChat();
 			net.minecraft.util.ChatStyle style = part.getChatStyle().createDeepCopy();
@@ -139,21 +154,147 @@ public final class ChatCompat {
 					&& style.getInsertion() == null ? dev.theredstonee.trsclient.core.chat.ChatCoords.find(text)
 					: java.util.Collections.<dev.theredstonee.trsclient.core.chat.ChatCoords.Hit>emptyList();
 			int pos = 0;
+			if (fromMod == null) fromMod = dev.theredstonee.trsclient.core.chat.ChatWaypoints.fromClickCommand(clickText(style.getChatClickEvent()));
 			for (dev.theredstonee.trsclient.core.chat.ChatCoords.Hit h : hits) {
 				if (h.start > pos) out.appendSibling(new ChatComponentText(text.substring(pos, h.start)).setChatStyle(style.createShallowCopy()));
-				net.minecraft.util.ChatStyle mark = style.createShallowCopy();
-				mark.setUnderlined(true);
-				mark.setInsertion(h.insertion());
-				mark.setChatHoverEvent(new net.minecraft.event.HoverEvent(net.minecraft.event.HoverEvent.Action.SHOW_TEXT,
-						new ChatComponentText(h.hover(hoverText))));
-				out.appendSibling(new ChatComponentText(text.substring(h.start, h.end)).setChatStyle(mark));
+				if (h.shared != null) {
+					// Statt der Rohnachricht: „… shared a waypoint called “Dorf” from Nether! [Add] · Xaero's Minimap“.
+					for (dev.theredstonee.trsclient.core.chat.ChatWaypoints.Part p : dev.theredstonee.trsclient.core.chat.ChatWaypoints.display(h.shared)) {
+						out.appendSibling(part(p, style));
+					}
+				} else {
+					net.minecraft.util.ChatStyle mark = style.createShallowCopy();
+					mark.setUnderlined(true);
+					mark.setInsertion(h.insertion());
+					mark.setChatHoverEvent(new net.minecraft.event.HoverEvent(net.minecraft.event.HoverEvent.Action.SHOW_TEXT,
+							new ChatComponentText(h.hover(hoverText))));
+					out.appendSibling(new ChatComponentText(text.substring(h.start, h.end)).setChatStyle(mark));
+				}
 				pos = h.end;
 				changed = true;
 			}
 			if (pos < text.length()) out.appendSibling(new ChatComponentText(text.substring(pos)).setChatStyle(style.createShallowCopy()));
 		}
+		// Xaeros eigene Zeile („[Add]“ führt /xaero_waypoint_add:… aus): „[Zu TRS hinzufügen]“ dahinter.
+		if (fromMod != null) {
+			out.appendSibling(part(dev.theredstonee.trsclient.core.chat.ChatWaypoints.trsAddButton(fromMod), new net.minecraft.util.ChatStyle()));
+			changed = true;
+		}
 		if (changed) event.message = out;
 		return changed;
+		//?}
+	}
+
+	/**
+	 * Ein Stück der Wegpunkt-Darstellung: Text und Name im Stil der Nachricht (Name unterstrichen, Klick = Fenster),
+	 * „[Add]“ grün unterstrichen (Klick = sofort speichern), Mod-Name grau.
+	 */
+	//? if >=1.9 {
+	/*private static ITextComponent part(dev.theredstonee.trsclient.core.chat.ChatWaypoints.Part p, net.minecraft.util.text.Style base) {
+		net.minecraft.util.text.Style st;
+		switch (p.kind) {
+			case NAME:
+				st = base.createShallowCopy();
+				st.setUnderlined(true);
+				break;
+			case ADD:
+				st = new net.minecraft.util.text.Style();
+				st.setColor(net.minecraft.util.text.TextFormatting.GREEN);
+				st.setUnderlined(true);
+				break;
+			case MOD:
+				st = new net.minecraft.util.text.Style();
+				st.setColor(net.minecraft.util.text.TextFormatting.GRAY);
+				break;
+			default:
+				st = base.createShallowCopy();
+		}
+		if (p.insertion != null) st.setInsertion(p.insertion);
+		if (p.hover != null) {
+			st.setHoverEvent(new net.minecraft.util.text.event.HoverEvent(net.minecraft.util.text.event.HoverEvent.Action.SHOW_TEXT,
+					new TextComponentString(p.hover)));
+		}
+		return new TextComponentString(p.text).setStyle(st);
+	}
+
+	// Text eines Befehls-Klicks (andere Mods, z. B. Xaeros „[Add]“), sonst null.
+	private static String clickText(net.minecraft.util.text.event.ClickEvent e) {
+		return e != null && (e.getAction() == net.minecraft.util.text.event.ClickEvent.Action.RUN_COMMAND
+				|| e.getAction() == net.minecraft.util.text.event.ClickEvent.Action.SUGGEST_COMMAND) ? e.getValue() : null;
+	}
+	*///?} else {
+	private static IChatComponent part(dev.theredstonee.trsclient.core.chat.ChatWaypoints.Part p, net.minecraft.util.ChatStyle base) {
+		net.minecraft.util.ChatStyle st;
+		switch (p.kind) {
+			case NAME:
+				st = base.createShallowCopy();
+				st.setUnderlined(true);
+				break;
+			case ADD:
+				st = new net.minecraft.util.ChatStyle();
+				st.setColor(net.minecraft.util.EnumChatFormatting.GREEN);
+				st.setUnderlined(true);
+				break;
+			case MOD:
+				st = new net.minecraft.util.ChatStyle();
+				st.setColor(net.minecraft.util.EnumChatFormatting.GRAY);
+				break;
+			default:
+				st = base.createShallowCopy();
+		}
+		if (p.insertion != null) st.setInsertion(p.insertion);
+		if (p.hover != null) {
+			st.setChatHoverEvent(new net.minecraft.event.HoverEvent(net.minecraft.event.HoverEvent.Action.SHOW_TEXT,
+					new ChatComponentText(p.hover)));
+		}
+		return new ChatComponentText(p.text).setChatStyle(st);
+	}
+
+	// Text eines Befehls-Klicks (andere Mods, z. B. Xaeros „[Add]“), sonst null.
+	private static String clickText(net.minecraft.event.ClickEvent e) {
+		return e != null && (e.getAction() == net.minecraft.event.ClickEvent.Action.RUN_COMMAND
+				|| e.getAction() == net.minecraft.event.ClickEvent.Action.SUGGEST_COMMAND) ? e.getValue() : null;
+	}
+	//?}
+
+	/**
+	 * Hat die (geschmückte) Nachricht einen „[Add]“-Knopf? Dann nicht über {@link #reprintIndented} neu drucken – der
+	 * umbrochene Text verliert die Stile und damit den Knopf.
+	 */
+	public static boolean hasWaypointButton(ClientChatReceivedEvent event) {
+		//? if >=1.9 {
+		/*ITextComponent original = event.getMessage();
+		if (original == null) return false;
+		for (ITextComponent part : original) {
+			if (dev.theredstonee.trsclient.core.chat.ChatWaypoints.isAddMarker(part.getStyle().getInsertion())) return true;
+		}
+		return false;
+		*///?} else {
+		IChatComponent original = event.message;
+		if (original == null) return false;
+		for (IChatComponent part : original) {
+			if (dev.theredstonee.trsclient.core.chat.ChatWaypoints.isAddMarker(part.getChatStyle().getInsertion())) return true;
+		}
+		return false;
+		//?}
+	}
+
+	/** Gibt es in der Nachricht einen Klick, der einen geteilten Wegpunkt hinzufügt (Xaeros „[Add]“)? */
+	public static boolean hasSharedClick(ClientChatReceivedEvent event) {
+		//? if >=1.9 {
+		/*ITextComponent original = event.getMessage();
+		if (original == null) return false;
+		for (ITextComponent part : original) {
+			if (dev.theredstonee.trsclient.core.chat.ChatWaypoints.fromClickCommand(clickText(part.getStyle().getClickEvent())) != null) return true;
+		}
+		return false;
+		*///?} else {
+		IChatComponent original = event.message;
+		if (original == null) return false;
+		for (IChatComponent part : original) {
+			if (dev.theredstonee.trsclient.core.chat.ChatWaypoints.fromClickCommand(clickText(part.getChatStyle().getChatClickEvent())) != null) return true;
+		}
+		return false;
 		//?}
 	}
 
