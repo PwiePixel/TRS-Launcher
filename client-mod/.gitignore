@@ -30,3 +30,5 @@ replay_*.log
 # Bereitgestellte Quellen privater Erweiterungen (gradle/trs-private.gradle) – nie einchecken
 src/trsext/
 **/src/trsext/
+# Logs von Log4j (Minecraft im Testpfad) aus den common-Tests der Loader-Builds (Arbeitsordner common/)
+common/logs/
