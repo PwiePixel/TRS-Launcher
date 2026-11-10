@@ -1,0 +1,11 @@
+// Unit-Tests von common, mitkompiliert in einem Loader-Projekt (forge, neoforge, forge-mojmap-legacy): dieselben
+// Test-Ressourcen, derselbe Arbeitsordner und dieselbe Locale wie in :common – sonst fehlen z. B. Kosmetik-JSONs,
+// Testpartien und die Schaltungen aus <repo>/data, und Tests mit relativen Pfaden (src/main/java/…) laufen ins Leere.
+def commonDir = new File(buildscript.sourceFile.parentFile, '../common').canonicalFile
+sourceSets.test.java.srcDir(new File(commonDir, 'src/test/java'))
+sourceSets.test.resources.srcDir(new File(commonDir, 'src/test/resources'))
+sourceSets.test.resources.srcDir(new File(commonDir, '../../data'))
+tasks.named('test') {
+	workingDir = commonDir
+}
+apply from: new File(buildscript.sourceFile.parentFile, 'utf8-tests.gradle')

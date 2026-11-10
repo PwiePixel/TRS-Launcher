@@ -1,0 +1,8 @@
+// Test-JVM mit UTF-8-Locale: Dateinamen mit Umlauten (z. B. „Schöne Texturen.zip“ in den Hosting-Tests) brauchen sie.
+// Ohne (Container, CI mit LANG=C/POSIX) kodiert die JVM Pfade als ASCII und die Tests brechen mit InvalidPathException ab.
+tasks.named('test') {
+	def locale = System.getenv('LC_ALL') ?: System.getenv('LC_CTYPE') ?: System.getenv('LANG') ?: ''
+	if (!System.getProperty('os.name').toLowerCase().contains('windows') && !(locale =~ /(?i)utf-?8/)) {
+		environment 'LC_ALL', 'C.UTF-8'
+	}
+}

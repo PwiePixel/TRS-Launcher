@@ -53,6 +53,7 @@ test {
 		events 'passed', 'skipped', 'failed'
 	}
 }
+apply from: rootProject.file('gradle/utf8-tests.gradle')
 
 // Optionale private Erweiterungen: deren Logik und Unit-Tests laufen mit (-PtrsPrivate=<ordner>, siehe gradle/trs-private.gradle).
 ext.trsTree = 'common'

@@ -191,8 +191,8 @@ tasks.withType(JavaCompile).configureEach {
 sourceSets {
 	main.java.srcDir(rootProject.file('../common/src/main/java'))
 	main.resources.srcDir(rootProject.file('../common/src/main/resources'))
-	test.java.srcDir(rootProject.file('../common/src/test/java'))
 }
+apply from: new File(buildscript.sourceFile.parentFile, '../gradle/common-tests.gradle')
 
 repositories {
 	mavenCentral()
@@ -234,6 +234,8 @@ dependencies {
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 	// DPAPI-Test (Kontenspeicher) wie in common: JNA liegt sonst nicht im Testpfad.
 	testRuntimeOnly 'net.java.dev.jna:jna:3.4.0'
+	// Netz-Tests (core.net, Welt-Hosting) wie in common: ModDevGradle legt Minecraft samt Netty nicht in den Testpfad.
+	testImplementation 'io.netty:netty-all:4.0.23.Final'
 }
 
 test {
