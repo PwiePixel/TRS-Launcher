@@ -41,6 +41,12 @@ sourceSets {
 
 test {
 	useJUnitPlatform()
+	// Dateinamen mit Umlauten (z. B. „Schöne Texturen.zip“) brauchen eine UTF-8-Locale. Ohne sie (Container, CI mit
+	// LANG=C/POSIX) kodiert die JVM Pfade als ASCII und die Tests brechen mit InvalidPathException ab.
+	def locale = System.getenv('LC_ALL') ?: System.getenv('LC_CTYPE') ?: System.getenv('LANG') ?: ''
+	if (!System.getProperty('os.name').toLowerCase().contains('windows') && !(locale =~ /(?i)utf-?8/)) {
+		environment 'LC_ALL', 'C.UTF-8'
+	}
 	// Opt-in-Tests mit Netz (z. B. -Dtrsclient.test.e4mc=true) an die Test-JVM durchreichen.
 	System.properties.findAll { it.key.toString().startsWith('trsclient.test.') }.each { k, v -> systemProperty k, v }
 	testLogging {
