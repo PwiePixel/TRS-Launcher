@@ -40,6 +40,18 @@ How to write an entry:
 - **TRS Client: Wegpunkte von Xaero's Minimap und JourneyMap im Chat.** Teilt jemand im Spiel-Chat einen Wegpunkt mit Xaero's Minimap (`xaero-waypoint:…`) oder JourneyMap (`[name:…, x:…, z:…]`, VoxelMap schreibt dasselbe), zeigt der TRS Client ihn so an wie Xaero's Minimap – auch wenn du den Mod nicht hast: „Alex hat einen Wegpunkt namens „Dorf“ geteilt (Nether)! [Hinzufügen] · Xaero's Minimap“ – am Ende steht, aus welchem Mod er kommt. **[Hinzufügen]** legt den Wegpunkt sofort auf deine Karte, mit Name, Farbe, Kürzel und seiner eigenen Dimension – ein Nether-Wegpunkt bleibt im Nether, auch wenn du in der Oberwelt bist. Ein Klick auf den Namen öffnet erst „Als Wegpunkt speichern“, damit du Name oder Farbe ändern kannst. Ohne Höhe (`~`) wird deine eigene Höhe genommen. Zeigst du darauf, siehst du Mod, Position und Dimension; Umschalt+Klick auf den Namen setzt die ursprüngliche Nachricht wie bisher ins Eingabefeld. Hast du Xaero's Minimap selbst installiert, bekommt dessen eigene Zeile zusätzlich **[Zu TRS hinzufügen]**. Das geht auf Fabric, Forge und NeoForge ab Minecraft 1.16 und auf Forge 1.8.9–1.12.2, nur auf deinem PC – gesendet wird nichts. Es gehört zu „Koordinaten anklickbar“ im Modul „Chat-Verbesserungen“.
 - **TRS Client: eigene Wegpunkte für Xaero's Minimap und JourneyMap teilen.** Das Rechtsklick-Menü eines Wegpunkts (Weltkarte und Wegpunkt-Liste) und einer freien Stelle auf der Weltkarte hat zwei neue Einträge: „Für Xaero's Minimap teilen“ und „Für JourneyMap teilen“. Sie posten den Wegpunkt im Format des jeweiligen Mods mit Name, Farbe, Kürzel und Dimension in den Spiel-Chat, sodass Freunde mit Xaero's Minimap oder JourneyMap ihn mit einem Klick übernehmen können – und andere TRS-Client-Nutzer auch. „Im Chat teilen“ und „An Freunde schicken“ bleiben, wie sie sind.
 
+## 0.34.1 – 2026-11-10 – Connected Mods Fix | Downloads repariert
+<!-- banner: accent=#41cd62 motif=/news/0.34.0/banner.png -->
+<!-- shots:
+/news/0.34.1/mod-list.png | Mods of an instance, which now download reliably when the game starts | Die Mods einer Instanz, die beim Spielstart jetzt zuverlässig laden
+-->
+
+### English
+- **Starting the game no longer gets stuck on "Mods".** If a download server answered only in a trickle, the launcher kept waiting on that one connection, sometimes for hours. Now it notices a stuck download after 20 seconds and tries again on a fresh connection, which often reaches a faster server. On a genuinely slow internet connection, files still finish downloading.
+
+### Deutsch
+- **Der Spielstart bleibt nicht mehr bei „Mods“ hängen.** Lieferte ein Download-Server nur noch tröpfchenweise, wartete der Launcher auf genau dieser Verbindung weiter, manchmal stundenlang. Jetzt erkennt er einen festgefahrenen Download nach 20 Sekunden und versucht es über eine neue Verbindung, die oft einen schnelleren Server erreicht. Bei einer wirklich langsamen Internetleitung werden die Dateien trotzdem fertig geladen.
+
 ## 0.34.0 – 2026-11-08 – Connected Mods | Mods verbunden
 <!-- banner: accent=#41cd62 motif=/news/0.34.0/banner.png -->
 <!-- shots:
