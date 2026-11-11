@@ -133,7 +133,12 @@ public final class ShareTest {
 				if (line != null) ChatLines.addMessage(line);
 				log("Bildschirmfoto-Zeile: " + (line != null) + ", Datei da: " + file.isFile());
 				// Echter Mausklick von außen (z. B. xdotool unter Xvfb): eigene Zeile, dann bei offenem Chat warten.
-				if (REAL_CLICK_PAUSE > 0) ChatLines.addMessage(Mc.text("<Cleo> " + REAL_CLICK_LINE));
+				if (REAL_CLICK_PAUSE > 0) {
+					// Mit -PtrsSys.trsclient.autotest.share.sendChat=true als echte Chatnachricht (über den Server) – so sieht
+					// sie auch Xaero's Minimap, wenn installiert, und baut seine eigene Zeile mit „[Add]“.
+					if (Boolean.getBoolean("trsclient.autotest.share.sendChat")) Mc.sendChat(REAL_CLICK_LINE);
+					else ChatLines.addMessage(Mc.text("<Cleo> " + REAL_CLICK_LINE));
+				}
 				Mc.setScreen(chatScreen());
 				phase++;
 				wait = 10;

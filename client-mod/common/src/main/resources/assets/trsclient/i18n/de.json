@@ -1902,6 +1902,7 @@
   "chat.waypoint.add": "Hinzufügen",
   "chat.waypoint.addTrs": "Zu TRS hinzufügen",
   "chat.waypoint.addHover": "Klicken: „{0}“ sofort zu deinen Wegpunkten hinzufügen (nur auf diesem PC)",
+  "chat.waypoint.otherDimension": "gespeichert in {0} – auf Minimap und Weltkarte zu sehen, wenn du dort bist",
   "chat.screenshot.share": "[Als Link teilen]",
   "chat.screenshot.shareHover": "Lädt das Bild auf den TRS-Server. Jeder mit dem Link kann es 30 Tage lang sehen.",
   "chat.screenshot.uploading": "Bildschirmfoto wird hochgeladen …",

@@ -446,7 +446,7 @@ public final class ChatWaypoints {
 	}
 
 	/** Mod, Position und Dimension in einer Zeile. */
-	static String details(Shared s) {
+	public static String details(Shared s) {
 		StringBuilder b = new StringBuilder(s.format.label()).append(" · ").append(position(s));
 		if (s.dimension != null) b.append(" · ").append(dev.theredstonee.trsclient.core.map.WorldMapUi.dimensionName(s.dimension));
 		return b.toString();

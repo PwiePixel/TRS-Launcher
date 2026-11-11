@@ -1902,6 +1902,7 @@
   "chat.waypoint.add": "Dodaj",
   "chat.waypoint.addTrs": "Dodaj do TRS",
   "chat.waypoint.addHover": "Kliknij: od razu dodaj „{0}” do swoich punktów (tylko na tym PC)",
+  "chat.waypoint.otherDimension": "zapisano w: {0} – widać go na minimapie i mapie, gdy tam jesteś",
   "chat.screenshot.share": "[Udostępnij link]",
   "chat.screenshot.shareHover": "Wysyła obraz na serwer TRS. Każdy z linkiem widzi go przez 30 dni.",
   "chat.screenshot.uploading": "Wysyłanie zrzutu…",

@@ -180,7 +180,12 @@ public final class ChatFeatures {
 			ChatWaypoints.Shared add = ChatWaypoints.parseAddMarker(insertion);
 			if (add != null) {
 				saveHost().playClick();
-				saveHost().notice(dev.theredstonee.trsclient.core.waypoint.WaypointShare.addShared(add));
+				String result = dev.theredstonee.trsclient.core.waypoint.WaypointShare.addShared(add);
+				TrsClient.LOGGER.info("[Chat] [Add] {} → {} (Welt {}, hier {})", add, result,
+						dev.theredstonee.trsclient.core.waypoint.WaypointShare.currentWorldKey(),
+						dev.theredstonee.trsclient.core.waypoint.WaypointShare.currentDimension());
+				saveHost().notice(result);
+				ChatCompat.printPlain("§a[TRS] " + result);
 				return true;
 			}
 			ChatWaypoints.Shared shared = ChatWaypoints.parse(insertion);

@@ -184,7 +184,13 @@ public final class ChatLinks {
 			ChatWaypoints.Shared add = coords ? ChatWaypoints.parseAddMarker(ins) : null;
 			if (add != null) {
 				saveHost().playClick();
-				notice(dev.theredstonee.trsclient.core.waypoint.WaypointShare.addShared(add));
+				String result = dev.theredstonee.trsclient.core.waypoint.WaypointShare.addShared(add);
+				TrsClient.LOGGER.info("[Chat] [Add] {} → {} (Welt {}, hier {})", add, result,
+						dev.theredstonee.trsclient.core.waypoint.WaypointShare.currentWorldKey(),
+						dev.theredstonee.trsclient.core.waypoint.WaypointShare.currentDimension());
+				// Rückmeldung als Chatzeile: die Aktionsleiste ist bei offenem Chat nicht zu sehen.
+				notice(result);
+				ChatLines.addMessage(QolText.literal("[TRS] " + result).setStyle(Style.EMPTY.applyFormat(ChatFormatting.GREEN)));
 				return true;
 			}
 			ChatWaypoints.Shared shared = coords ? ChatWaypoints.parse(ins) : null;

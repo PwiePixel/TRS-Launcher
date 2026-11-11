@@ -298,6 +298,17 @@ public final class ChatCompat {
 		//?}
 	}
 
+	/** Eigene, einfache Chatzeile (Formatcodes mit § erlaubt), z. B. die Rückmeldung nach „[Add]“. */
+	public static void printPlain(String text) {
+		GuiNewChat gui = chat();
+		if (gui == null) return;
+		//? if >=1.9 {
+		/*gui.printChatMessage(new TextComponentString(text));
+		*///?} else {
+		gui.printChatMessage(new ChatComponentText(text));
+		//?}
+	}
+
 	/**
 	 * Eigene Chatzeile aus Teilen der Screenshot-Werkzeuge (Aktionen gold mit Einfüge-Text + Hinweis, Dateiname
 	 * unterstrichen).
