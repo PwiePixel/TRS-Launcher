@@ -1900,7 +1900,6 @@
   "chat.waypoint.shared": "compartilhou um ponto chamado “{0}”!",
   "chat.waypoint.sharedFrom": "compartilhou um ponto chamado “{0}” ({1})!",
   "chat.waypoint.add": "Adicionar",
-  "chat.waypoint.addTrs": "Adicionar ao TRS",
   "chat.waypoint.addHover": "Clique: adicionar “{0}” aos seus pontos agora (só neste PC)",
   "chat.waypoint.otherDimension": "salvo em {0} – aparece no minimapa e no mapa quando você estiver lá",
   "chat.screenshot.share": "[Compartilhar link]",

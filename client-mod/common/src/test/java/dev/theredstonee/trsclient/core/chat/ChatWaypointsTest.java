@@ -298,6 +298,14 @@ class ChatWaypointsTest {
 		assertTrue(ChatWaypoints.isAddMarker(add.insertion));
 		assertTrue(add.hover.contains("Dorf") && add.hover.contains("-1500 ~ 900"), add.hover);
 		assertEquals(ChatWaypoints.Part.Kind.MOD, parts.get(parts.size() - 1).kind);
+		// Echte Klick-Aktion (damit Minecraft und andere Chat-Mods den Knopf als anklickbar behandeln).
+		assertEquals("/trsclient-waypoint-add " + s.text, add.command);
+		ChatWaypoints.Shared viaCommand = ChatWaypoints.parseAddCommand(add.command);
+		assertNotNull(viaCommand);
+		assertEquals("Dorf", viaCommand.name);
+		assertNull(ChatWaypoints.parseAddCommand("/tp 1 2 3"));
+		assertNull(ChatWaypoints.parseAddCommand(null));
+		assertNull(name.command);
 		ChatWaypoints.Shared back = ChatWaypoints.parseAddMarker(add.insertion);
 		assertNotNull(back);
 		assertEquals("Dorf", back.name);
@@ -314,8 +322,6 @@ class ChatWaypointsTest {
 		assertEquals("hat einen Wegpunkt namens „Turm“ geteilt (Oberwelt)! [Hinzufügen] · JourneyMap", joined(ChatWaypoints.display(turm)));
 		ChatWaypoints.Shared bare = ChatWaypoints.parse("[x:1, z:2]");
 		assertEquals("hat einen Wegpunkt namens „Aus dem Chat“ geteilt! [Hinzufügen] · JourneyMap", joined(ChatWaypoints.display(bare)));
-		I18n.use("en");
-		assertEquals(" [Add to TRS]", ChatWaypoints.trsAddButton(turm).text);
 	}
 
 	@Test
@@ -342,9 +348,6 @@ class ChatWaypointsTest {
 		assertNotNull(esc);
 		assertEquals("Spawn-Hub", esc.name);
 		assertEquals("minecraft:overworld", esc.dimension);
-		ChatWaypoints.Shared add = ChatWaypoints.parseAddMarker(ChatWaypoints.trsAddButton(s).insertion);
-		assertNotNull(add);
-		assertEquals(-1500, add.x);
 		// Andere Befehle und Links sind keine Wegpunkte.
 		assertNull(ChatWaypoints.fromClickCommand(null));
 		assertNull(ChatWaypoints.fromClickCommand("/tp 1 2 3"));

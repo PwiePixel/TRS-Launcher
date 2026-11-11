@@ -1900,7 +1900,6 @@
   "chat.waypoint.shared": "“{0}” adlı bir nokta paylaştı!",
   "chat.waypoint.sharedFrom": "“{0}” adlı bir nokta paylaştı ({1})!",
   "chat.waypoint.add": "Ekle",
-  "chat.waypoint.addTrs": "TRS'ye ekle",
   "chat.waypoint.addHover": "Tıkla: “{0}” noktasını hemen ekle (yalnızca bu PC)",
   "chat.waypoint.otherDimension": "{0} içine kaydedildi – oradayken mini haritada ve haritada görünür",
   "chat.screenshot.share": "[Bağlantı paylaş]",

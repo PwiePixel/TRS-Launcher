@@ -45,6 +45,11 @@ public final class ChatWaypoints {
 	private static final String XAERO_ADD_PREFIX = "xaero_waypoint_add";
 	/** Einfüge-Text des Knopfs „[Hinzufügen]“ (davor der Marker, danach die Nachricht): sofort speichern, ohne Fenster. */
 	static final String ADD_MARKER = "trs-waypoint-add:";
+	/**
+	 * Befehl hinter „[Add]“ (echte Klick-Aktion, damit Minecraft und andere Chat-Mods den Knopf als anklickbar behandeln):
+	 * {@code /trsclient-waypoint-add <Nachricht>}. Der TRS Client fängt den Klick ab, bevor etwas an den Server geht.
+	 */
+	static final String ADD_COMMAND = "trsclient-waypoint-add";
 	/** Platzhalter für den Namen beim Zerlegen des übersetzten Satzes (Privatbereich, kommt in Übersetzungen nicht vor). */
 	private static final String NAME_SLOT = "";
 	/**
@@ -378,12 +383,19 @@ public final class ChatWaypoints {
 		public final String insertion;
 		/** Hinweis beim Darüberfahren, null = keiner. */
 		public final String hover;
+		/** Befehl der Klick-Aktion (mit „/“), null = keine (dann zählt nur der Einfüge-Text). */
+		public final String command;
 
 		Part(Kind kind, String text, String insertion, String hover) {
+			this(kind, text, insertion, hover, null);
+		}
+
+		Part(Kind kind, String text, String insertion, String hover, String command) {
 			this.kind = kind;
 			this.text = text;
 			this.insertion = insertion;
 			this.hover = hover;
+			this.command = command;
 		}
 	}
 
@@ -408,14 +420,18 @@ public final class ChatWaypoints {
 		return out;
 	}
 
-	/** Knopf „[Zu TRS hinzufügen]“ hinter Xaeros eigener Chatzeile (wenn Xaero's Minimap selbst installiert ist). */
-	public static Part trsAddButton(Shared s) {
-		return addButton(s, "chat.waypoint.addTrs");
-	}
-
 	private static Part addButton(Shared s, String labelKey) {
 		String hover = I18n.tr("chat.waypoint.addHover", displayName(s)) + "\n" + details(s);
-		return new Part(Part.Kind.ADD, " [" + I18n.tr(labelKey) + "]", ADD_MARKER + s.text, hover);
+		return new Part(Part.Kind.ADD, " [" + I18n.tr(labelKey) + "]", ADD_MARKER + s.text, hover, "/" + ADD_COMMAND + " " + s.text);
+	}
+
+	/** Klick-Befehl eines „[Add]“-Knopfs ({@code /trsclient-waypoint-add …}) → der Wegpunkt; null = kein solcher Befehl. */
+	public static Shared parseAddCommand(String command) {
+		if (command == null) return null;
+		String c = command.trim();
+		if (c.startsWith("/")) c = c.substring(1);
+		if (!c.startsWith(ADD_COMMAND + " ")) return null;
+		return parse(c.substring(ADD_COMMAND.length() + 1));
 	}
 
 	/** Ist das der Einfüge-Text eines „[Add]“-Knopfs? */
