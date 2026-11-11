@@ -28,7 +28,11 @@ How to write an entry:
   "node --experimental-strip-types scripts/changelog.mjs set-contributors <version> <name1,name2>".
 -->
 
-## Unreleased
+## 0.35.0 – 2026-11-11 – Bulletproof | Kugelsicher
+<!-- banner: accent=#5aa9e6 motif=/news/0.35.0/banner.png -->
+<!-- shots:
+/news/0.35.0/launcher-log.png | Share the launcher log from the privacy settings | Das Launcher-Log in den Datenschutz-Einstellungen teilen
+-->
 
 ### English
 - **TRS Client: waypoints from Xaero's Minimap and JourneyMap in the chat.** When someone shares a waypoint in the game chat with Xaero's Minimap (`xaero-waypoint:…`) or JourneyMap (`[name:…, x:…, z:…]`, VoxelMap writes the same), the TRS Client shows it the way Xaero's Minimap does, even if you don't have that mod: "Alex shared a waypoint called “Village” from Nether! [Add] · Xaero's Minimap" – the mod it came from is at the end. **[Add]** puts the waypoint straight onto your map, with its name, colour, letters and own dimension – a Nether waypoint stays in the Nether, even if you are in the Overworld. Clicking the name opens "Save as waypoint" first, so you can change the name or colour. Without a height (`~`) your own height is used. Point at it to see the mod, the position and the dimension; Shift+click on the name still puts the original message into the chat input. If you have Xaero's Minimap installed too, its own **[Add]** puts the waypoint into Xaero's Minimap and onto the TRS map at the same time – one button for both. After a click a short line in the chat says where the waypoint was saved. This works on Fabric, Forge and NeoForge from Minecraft 1.16 and on Forge 1.8.9–1.12.2, only on your PC – nothing is sent. It belongs to "Clickable coordinates" in the Chat Improvements module.
@@ -61,6 +65,8 @@ How to write an entry:
 - A link from the website no longer opens a second time after the launcher window reloads.
 - Linux: the AppImage restarts by itself after an update, and the game finds the launcher connection more reliably.
 - If the launcher cannot start, it now shows an error message with the location of the log files instead of closing silently.
+- Restarting for an update now stops your local servers properly first, so the world is saved.
+- Quitting the launcher while a long recording is still being saved no longer loses it, and two clips saved in the same second no longer overwrite each other.
 
 ### Deutsch
 - **TRS Client: Wegpunkte von Xaero's Minimap und JourneyMap im Chat.** Teilt jemand im Spiel-Chat einen Wegpunkt mit Xaero's Minimap (`xaero-waypoint:…`) oder JourneyMap (`[name:…, x:…, z:…]`, VoxelMap schreibt dasselbe), zeigt der TRS Client ihn so an wie Xaero's Minimap – auch wenn du den Mod nicht hast: „Alex hat einen Wegpunkt namens „Dorf“ geteilt (Nether)! [Hinzufügen] · Xaero's Minimap“ – am Ende steht, aus welchem Mod er kommt. **[Hinzufügen]** legt den Wegpunkt sofort auf deine Karte, mit Name, Farbe, Kürzel und seiner eigenen Dimension – ein Nether-Wegpunkt bleibt im Nether, auch wenn du in der Oberwelt bist. Ein Klick auf den Namen öffnet erst „Als Wegpunkt speichern“, damit du Name oder Farbe ändern kannst. Ohne Höhe (`~`) wird deine eigene Höhe genommen. Zeigst du darauf, siehst du Mod, Position und Dimension; Umschalt+Klick auf den Namen setzt die ursprüngliche Nachricht wie bisher ins Eingabefeld. Hast du Xaero's Minimap selbst installiert, trägt dessen eigenes **[Add]** den Wegpunkt gleichzeitig in Xaero's Minimap und auf die TRS-Karte ein – ein Knopf für beides. Nach dem Klick sagt eine kurze Zeile im Chat, wo der Wegpunkt gespeichert wurde. Das geht auf Fabric, Forge und NeoForge ab Minecraft 1.16 und auf Forge 1.8.9–1.12.2, nur auf deinem PC – gesendet wird nichts. Es gehört zu „Koordinaten anklickbar“ im Modul „Chat-Verbesserungen“.
@@ -93,6 +99,8 @@ How to write an entry:
 - Ein Link von der Website öffnet sich nach dem Neuladen des Launcher-Fensters nicht noch einmal.
 - Linux: Das AppImage startet nach einem Update von selbst neu, und das Spiel findet die Verbindung zum Launcher zuverlässiger.
 - Kann der Launcher nicht starten, zeigt er jetzt eine Fehlermeldung mit dem Ort der Log-Dateien, statt sich still zu schließen.
+- Beim Neustart für ein Update werden lokale Server jetzt vorher sauber gestoppt, die Welt wird gespeichert.
+- Wer den Launcher beendet, während eine lange Aufnahme noch gespeichert wird, verliert sie nicht mehr, und zwei Clips aus derselben Sekunde überschreiben sich nicht mehr.
 
 ## 0.34.1 – 2026-11-10 – Connected Mods Fix | Downloads repariert
 <!-- banner: accent=#41cd62 motif=/news/0.34.0/banner.png -->
