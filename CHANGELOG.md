@@ -28,6 +28,16 @@ How to write an entry:
   "node --experimental-strip-types scripts/changelog.mjs set-contributors <version> <name1,name2>".
 -->
 
+## Unreleased
+
+### English
+- **TRS Client: waypoints from Xaero's Minimap and JourneyMap in the chat.** When someone shares a waypoint in the game chat with Xaero's Minimap (`xaero-waypoint:…`) or JourneyMap (`[name:…, x:…, z:…]`, VoxelMap writes the same), the TRS Client shows it the way Xaero's Minimap does, even if you don't have that mod: "Alex shared a waypoint called “Village” from Nether! [Add] · Xaero's Minimap" – the mod it came from is at the end. **[Add]** puts the waypoint straight onto your map, with its name, colour, letters and own dimension – a Nether waypoint stays in the Nether, even if you are in the Overworld. Clicking the name opens "Save as waypoint" first, so you can change the name or colour. Without a height (`~`) your own height is used. Point at it to see the mod, the position and the dimension; Shift+click on the name still puts the original message into the chat input. If you have Xaero's Minimap installed too, its own **[Add]** puts the waypoint into Xaero's Minimap and onto the TRS map at the same time – one button for both. After a click a short line in the chat says where the waypoint was saved. This works on Fabric, Forge and NeoForge from Minecraft 1.16 and on Forge 1.8.9–1.12.2, only on your PC – nothing is sent. It belongs to "Clickable coordinates" in the Chat Improvements module.
+- **TRS Client: share your waypoints for Xaero's Minimap and JourneyMap.** The right-click menu of a waypoint (world map and waypoint list) and of a free spot on the world map has two new entries: "Post for Xaero's Minimap" and "Post for JourneyMap". They post the waypoint in the game chat in that mod's format, with name, colour, letters and dimension, so friends with Xaero's Minimap or JourneyMap can add it with one click – and other TRS Client users too. "Post in game chat" and "Send to a friend" stay as they are.
+
+### Deutsch
+- **TRS Client: Wegpunkte von Xaero's Minimap und JourneyMap im Chat.** Teilt jemand im Spiel-Chat einen Wegpunkt mit Xaero's Minimap (`xaero-waypoint:…`) oder JourneyMap (`[name:…, x:…, z:…]`, VoxelMap schreibt dasselbe), zeigt der TRS Client ihn so an wie Xaero's Minimap – auch wenn du den Mod nicht hast: „Alex hat einen Wegpunkt namens „Dorf“ geteilt (Nether)! [Hinzufügen] · Xaero's Minimap“ – am Ende steht, aus welchem Mod er kommt. **[Hinzufügen]** legt den Wegpunkt sofort auf deine Karte, mit Name, Farbe, Kürzel und seiner eigenen Dimension – ein Nether-Wegpunkt bleibt im Nether, auch wenn du in der Oberwelt bist. Ein Klick auf den Namen öffnet erst „Als Wegpunkt speichern“, damit du Name oder Farbe ändern kannst. Ohne Höhe (`~`) wird deine eigene Höhe genommen. Zeigst du darauf, siehst du Mod, Position und Dimension; Umschalt+Klick auf den Namen setzt die ursprüngliche Nachricht wie bisher ins Eingabefeld. Hast du Xaero's Minimap selbst installiert, trägt dessen eigenes **[Add]** den Wegpunkt gleichzeitig in Xaero's Minimap und auf die TRS-Karte ein – ein Knopf für beides. Nach dem Klick sagt eine kurze Zeile im Chat, wo der Wegpunkt gespeichert wurde. Das geht auf Fabric, Forge und NeoForge ab Minecraft 1.16 und auf Forge 1.8.9–1.12.2, nur auf deinem PC – gesendet wird nichts. Es gehört zu „Koordinaten anklickbar“ im Modul „Chat-Verbesserungen“.
+- **TRS Client: eigene Wegpunkte für Xaero's Minimap und JourneyMap teilen.** Das Rechtsklick-Menü eines Wegpunkts (Weltkarte und Wegpunkt-Liste) und einer freien Stelle auf der Weltkarte hat zwei neue Einträge: „Für Xaero's Minimap teilen“ und „Für JourneyMap teilen“. Sie posten den Wegpunkt im Format des jeweiligen Mods mit Name, Farbe, Kürzel und Dimension in den Spiel-Chat, sodass Freunde mit Xaero's Minimap oder JourneyMap ihn mit einem Klick übernehmen können – und andere TRS-Client-Nutzer auch. „Im Chat teilen“ und „An Freunde schicken“ bleiben, wie sie sind.
+
 ## 0.35.0 – 2026-11-11 – Bulletproof | Kugelsicher
 <!-- banner: accent=#5aa9e6 motif=/news/0.35.0/banner.png -->
 <!-- shots:
@@ -97,82 +107,6 @@ How to write an entry:
 - Kann der Launcher nicht starten, zeigt er jetzt eine Fehlermeldung mit dem Ort der Log-Dateien, statt sich still zu schließen.
 - Beim Neustart für ein Update werden lokale Server jetzt vorher sauber gestoppt, die Welt wird gespeichert.
 - Wer den Launcher beendet, während eine lange Aufnahme noch gespeichert wird, verliert sie nicht mehr, und zwei Clips aus derselben Sekunde überschreiben sich nicht mehr.
-
-## 0.34.1 – 2026-11-10 – Connected Mods Fix | Downloads repariert
-<!-- banner: accent=#41cd62 motif=/news/0.34.0/banner.png -->
-<!-- shots:
-/news/0.34.1/mod-list.png | Mods of an instance, which now download reliably when the game starts | Die Mods einer Instanz, die beim Spielstart jetzt zuverlässig laden
--->
-
-### English
-- **Starting the game no longer gets stuck on "Mods".** If a download server answered only in a trickle, the launcher kept waiting on that one connection, sometimes for hours. Now it notices a stuck download after 20 seconds and tries again on a fresh connection, which often reaches a faster server. On a genuinely slow internet connection, files still finish downloading.
-
-### Deutsch
-- **Der Spielstart bleibt nicht mehr bei „Mods“ hängen.** Lieferte ein Download-Server nur noch tröpfchenweise, wartete der Launcher auf genau dieser Verbindung weiter, manchmal stundenlang. Jetzt erkennt er einen festgefahrenen Download nach 20 Sekunden und versucht es über eine neue Verbindung, die oft einen schnelleren Server erreicht. Bei einer wirklich langsamen Internetleitung werden die Dateien trotzdem fertig geladen.
-
-### English
-- **TRS Client: waypoints from Xaero's Minimap and JourneyMap in the chat.** When someone shares a waypoint in the game chat with Xaero's Minimap (`xaero-waypoint:…`) or JourneyMap (`[name:…, x:…, z:…]`, VoxelMap writes the same), the TRS Client shows it the way Xaero's Minimap does, even if you don't have that mod: "Alex shared a waypoint called “Village” from Nether! [Add] · Xaero's Minimap" – the mod it came from is at the end. **[Add]** puts the waypoint straight onto your map, with its name, colour, letters and own dimension – a Nether waypoint stays in the Nether, even if you are in the Overworld. Clicking the name opens "Save as waypoint" first, so you can change the name or colour. Without a height (`~`) your own height is used. Point at it to see the mod, the position and the dimension; Shift+click on the name still puts the original message into the chat input. If you have Xaero's Minimap installed too, its own **[Add]** puts the waypoint into Xaero's Minimap and onto the TRS map at the same time – one button for both. After a click a short line in the chat says where the waypoint was saved. This works on Fabric, Forge and NeoForge from Minecraft 1.16 and on Forge 1.8.9–1.12.2, only on your PC – nothing is sent. It belongs to "Clickable coordinates" in the Chat Improvements module.
-- **TRS Client: share your waypoints for Xaero's Minimap and JourneyMap.** The right-click menu of a waypoint (world map and waypoint list) and of a free spot on the world map has two new entries: "Post for Xaero's Minimap" and "Post for JourneyMap". They post the waypoint in the game chat in that mod's format, with name, colour, letters and dimension, so friends with Xaero's Minimap or JourneyMap can add it with one click – and other TRS Client users too. "Post in game chat" and "Send to a friend" stay as they are.
-- **TRS Client settings no longer jump back after a restart.** If you play several instances with the same TRS account, an instance that had not been started for a while could upload its old settings after an update and the others then took them over (Freelook off again, HUD profiles gone). Settings that were only loaded now count from when they were last saved, so newer ones win. Settings changed right before quitting are now always written to disk.
-- **TRS Client keys can be key combos** like Ctrl+M, Alt+G or F3+X. Hold Ctrl, Alt, Shift or F3 while assigning the key; click the key button again to bind the modifier alone.
-- **F3 combos stay with Minecraft:** F3+B no longer opens the TRS waypoint menu, and TRS keys don't fire while F3 is held.
-- **Mods download in parallel when starting the game,** so the first start of a modpack is much faster.
-- **The TRS Client download at game start retries on a fresh connection** if it gets stuck, instead of giving up after 90 seconds on slow internet.
-- **Share the launcher log:** Settings → Privacy now has "Share log" and "Open folder" for the launcher's own log, so someone helping you can see what went wrong.
-- TRS Client: clicking in chat with chat heads on no longer crashes the game.
-- TRS Client: after switching accounts in-game, online features no longer keep running as the previous account.
-- TRS Client: Fair Play and "no minimap" codes a server sends in chat right when you join are respected again, also when your chat filter hides that message.
-- TRS Client: an unreadable waypoints file is kept as a backup instead of being overwritten.
-- Settings no longer undo each other: a Java download that finishes in the background, hints you close and quick toggles in Big Picture all keep their change, even while the settings window is open.
-- Retrying a task right after it finished no longer loses its progress and speed display, and a failed resume shows the task as paused again.
-- Closing a clip in fullscreen also brings the launcher window back out of fullscreen.
-- After switching accounts, friends, chats and capes of the previous account no longer show up for a moment.
-- Lists in the team area, mod pages and searches always show the result of the latest request, and loading indicators no longer get stuck.
-- Small fixes for leftover timers and listeners after leaving a page, the 3D skin preview, quickly opening and closing Big Picture, and the PC remote reporting "offline" after a failed attempt.
-- **Playing offline works again with the newest Fabric or Quilt loader and with the TRS optimization for Vanilla.** The launcher now uses the loader it already downloaded instead of giving up.
-- **Big downloads on a slow connection no longer stop after 30 minutes.** A file that is in use by a running game is no longer downloaded again and again.
-- **You stay signed in when Microsoft or Xbox services have a hiccup.** The game starts with your saved sign-in, just like without internet, and a renewed sign-in is no longer lost halfway.
-- **Starting an instance a second time no longer touches the mods of the copy that is already running.**
-- After a memory error, the automatic restart keeps your chosen account and server. Repair and reinstall wait until a start of the same instance has finished.
-- Exporting a modpack or world now reports an error if the file could not be written completely (for example on a full disk). A broken Forge or NeoForge installer is downloaded again on the next try.
-- If the accounts list or skin library file is damaged, a backup copy is kept instead of being overwritten.
-- The live connection (chat, friends, notifications) reconnects after standby and no longer misses a message after a reconnect. TRS sign-ins are no longer dropped by mistake when several requests run at once.
-- Declining the TRS services no longer leaves a fresh sign-in behind. Skin sync no longer downloads skins again and again when your skin library is full.
-- A link from the website no longer opens a second time after the launcher window reloads.
-- Linux: the AppImage restarts by itself after an update, and the game finds the launcher connection more reliably.
-- If the launcher cannot start, it now shows an error message with the location of the log files instead of closing silently.
-
-### Deutsch
-- **TRS Client: Wegpunkte von Xaero's Minimap und JourneyMap im Chat.** Teilt jemand im Spiel-Chat einen Wegpunkt mit Xaero's Minimap (`xaero-waypoint:…`) oder JourneyMap (`[name:…, x:…, z:…]`, VoxelMap schreibt dasselbe), zeigt der TRS Client ihn so an wie Xaero's Minimap – auch wenn du den Mod nicht hast: „Alex hat einen Wegpunkt namens „Dorf“ geteilt (Nether)! [Hinzufügen] · Xaero's Minimap“ – am Ende steht, aus welchem Mod er kommt. **[Hinzufügen]** legt den Wegpunkt sofort auf deine Karte, mit Name, Farbe, Kürzel und seiner eigenen Dimension – ein Nether-Wegpunkt bleibt im Nether, auch wenn du in der Oberwelt bist. Ein Klick auf den Namen öffnet erst „Als Wegpunkt speichern“, damit du Name oder Farbe ändern kannst. Ohne Höhe (`~`) wird deine eigene Höhe genommen. Zeigst du darauf, siehst du Mod, Position und Dimension; Umschalt+Klick auf den Namen setzt die ursprüngliche Nachricht wie bisher ins Eingabefeld. Hast du Xaero's Minimap selbst installiert, trägt dessen eigenes **[Add]** den Wegpunkt gleichzeitig in Xaero's Minimap und auf die TRS-Karte ein – ein Knopf für beides. Nach dem Klick sagt eine kurze Zeile im Chat, wo der Wegpunkt gespeichert wurde. Das geht auf Fabric, Forge und NeoForge ab Minecraft 1.16 und auf Forge 1.8.9–1.12.2, nur auf deinem PC – gesendet wird nichts. Es gehört zu „Koordinaten anklickbar“ im Modul „Chat-Verbesserungen“.
-- **TRS Client: eigene Wegpunkte für Xaero's Minimap und JourneyMap teilen.** Das Rechtsklick-Menü eines Wegpunkts (Weltkarte und Wegpunkt-Liste) und einer freien Stelle auf der Weltkarte hat zwei neue Einträge: „Für Xaero's Minimap teilen“ und „Für JourneyMap teilen“. Sie posten den Wegpunkt im Format des jeweiligen Mods mit Name, Farbe, Kürzel und Dimension in den Spiel-Chat, sodass Freunde mit Xaero's Minimap oder JourneyMap ihn mit einem Klick übernehmen können – und andere TRS-Client-Nutzer auch. „Im Chat teilen“ und „An Freunde schicken“ bleiben, wie sie sind.
-- **TRS-Client-Einstellungen springen nach einem Neustart nicht mehr zurück.** Wer mehrere Instanzen mit demselben TRS-Konto spielt: Eine länger nicht gestartete Instanz konnte nach einem Update ihre alten Einstellungen hochladen, und die anderen übernahmen sie (Freelook wieder aus, HUD-Profile weg). Nur geladene Einstellungen zählen jetzt ab ihrem letzten Speichern, neuere gewinnen. Einstellungen, die kurz vor dem Beenden geändert wurden, landen jetzt immer auf der Platte.
-- **TRS-Client-Tasten können Tasten-Kombis sein** wie Strg+M, Alt+G oder F3+X. Beim Belegen Strg, Alt, Umschalt oder F3 gedrückt halten; nochmal auf die Taste klicken belegt den Modifikator allein.
-- **F3-Kombis bleiben bei Minecraft:** F3+B öffnet nicht mehr das TRS-Wegpunkt-Menü, und TRS-Tasten lösen nicht aus, solange F3 gehalten wird.
-- **Mods laden beim Spielstart parallel,** der erste Start eines Modpacks geht dadurch deutlich schneller.
-- **Der TRS-Client-Download beim Spielstart versucht es über eine neue Verbindung,** wenn er hängt, statt bei langsamem Internet nach 90 Sekunden aufzugeben.
-- **Launcher-Log teilen:** Unter Einstellungen → Datenschutz gibt es jetzt „Log teilen“ und „Ordner öffnen“ für das Log des Launchers, damit jemand, der dir hilft, sieht, was schiefging.
-- TRS Client: Ein Klick in den Chat mit eingeschalteten Chat-Köpfen bringt das Spiel nicht mehr zum Absturz.
-- TRS Client: Nach einem Kontowechsel im Spiel laufen die Online-Funktionen nicht mehr mit dem vorigen Konto weiter.
-- TRS Client: Fair-Play- und „Keine Minimap“-Codes, die ein Server direkt beim Betreten im Chat schickt, gelten wieder, auch wenn der Chat-Filter die Nachricht ausblendet.
-- TRS Client: Eine unlesbare Wegpunkt-Datei wird als Sicherung behalten statt überschrieben.
-- Einstellungen heben sich nicht mehr gegenseitig auf: Ein Java-Download, der im Hintergrund fertig wird, weggeklickte Hinweise und schnelle Schalter in Big Picture behalten ihre Änderung, auch während das Einstellungsfenster offen ist.
-- Wird eine Aufgabe gleich nach dem Ende neu gestartet, gehen Fortschritt und Geschwindigkeit nicht mehr verloren, und ein fehlgeschlagenes Fortsetzen zeigt die Aufgabe wieder als pausiert.
-- Wer einen Clip im Vollbild schließt, bekommt auch das Launcher-Fenster wieder aus dem Vollbild.
-- Nach einem Kontowechsel tauchen Freunde, Chats und Umhänge des vorigen Kontos nicht mehr kurz auf.
-- Listen im Team-Bereich, Mod-Seiten und Suchen zeigen immer das Ergebnis der letzten Anfrage, Ladeanzeigen bleiben nicht mehr hängen.
-- Kleine Korrekturen an liegengebliebenen Timern und Listenern nach dem Verlassen einer Seite, an der 3D-Skin-Vorschau, beim schnellen Öffnen und Schließen von Big Picture und an der PC-Fernbedienung, die „offline“ nach einem Fehlversuch nachmeldet.
-- **Offline spielen klappt wieder mit dem neuesten Fabric- oder Quilt-Loader und mit der TRS-Optimierung für Vanilla.** Der Launcher nimmt jetzt den schon geladenen Loader, statt aufzugeben.
-- **Große Downloads brechen bei langsamer Leitung nicht mehr nach 30 Minuten ab.** Eine Datei, die ein laufendes Spiel gerade benutzt, wird nicht mehr immer wieder neu geladen.
-- **Du bleibst angemeldet, wenn die Dienste von Microsoft oder Xbox kurz streiken.** Das Spiel startet mit der gespeicherten Anmeldung wie ohne Internet, und eine erneuerte Anmeldung geht nicht mehr auf halbem Weg verloren.
-- **Eine Instanz ein zweites Mal zu starten, verändert die Mods der schon laufenden Kopie nicht mehr.**
-- Nach einem Speicherfehler behält der automatische Neustart das gewählte Konto und den Server. Reparieren und Neu installieren warten, bis ein Start derselben Instanz fertig ist.
-- Beim Export eines Modpacks oder einer Welt kommt jetzt eine Fehlermeldung, wenn die Datei nicht vollständig geschrieben werden konnte (z. B. bei voller Festplatte). Ein kaputter Forge- oder NeoForge-Installer wird beim nächsten Versuch neu geladen.
-- Ist die Datei mit den Konten oder der Skin-Bibliothek beschädigt, bleibt eine Sicherungskopie erhalten, statt überschrieben zu werden.
-- Die Live-Verbindung (Chat, Freunde, Benachrichtigungen) verbindet sich nach dem Standby neu und verpasst nach einem Neuverbinden keine Nachricht mehr. TRS-Anmeldungen gehen nicht mehr versehentlich verloren, wenn mehrere Anfragen gleichzeitig laufen.
-- Wer die TRS-Dienste ablehnt, behält keine frische Anmeldung mehr zurück. Der Skin-Abgleich lädt bei voller Skin-Bibliothek nicht mehr immer wieder Skins herunter.
-- Ein Link von der Website öffnet sich nach dem Neuladen des Launcher-Fensters nicht noch einmal.
-- Linux: Das AppImage startet nach einem Update von selbst neu, und das Spiel findet die Verbindung zum Launcher zuverlässiger.
-- Kann der Launcher nicht starten, zeigt er jetzt eine Fehlermeldung mit dem Ort der Log-Dateien, statt sich still zu schließen.
 
 ## 0.34.1 – 2026-11-10 – Connected Mods Fix | Downloads repariert
 <!-- banner: accent=#41cd62 motif=/news/0.34.0/banner.png -->
