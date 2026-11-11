@@ -153,7 +153,11 @@ public final class ChatHeadHooks {
 		int alpha = (int) (opacity * 255f);
 		if (alpha < 0) alpha = 0;
 		if (alpha > 255) alpha = 255;
-		drawAt(key, y, (alpha << 24) | 0xFFFFFF);
+		// Ohne Zeichenfläche läuft gerade keine Zeichen-, sondern die Klick-Runde (ChatScreen#mouseClicked →
+		// captureClickableText): nichts zeichnen – das warf eine NullPointerException, Minecraft verwarf den ganzen Klick,
+		// und kein Link im Chat reagierte auf Zeilen mit Kopf. Die Verschiebung bleibt, damit die Klickflächen genau
+		// dort liegen, wo der Text gezeichnet ist.
+		if (frame != null) drawAt(key, y, (alpha << 24) | 0xFFFFFF);
 		lineShift = ChatHeadLayout.WIDTH;
 		pose(lineShift);
 	}
