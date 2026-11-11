@@ -18,6 +18,8 @@ use crate::{Error, Result, fsutil, task};
 const MAX_ATTEMPTS: u32 = 8;
 /// Falsche Prüfsumme kann ein abgeschnittener Download sein – ein paar Mal neu laden, dann aufgeben.
 const MAX_CHECKSUM_ATTEMPTS: u32 = 3;
+/// Datei-Fehler (z. B. Ziel vom laufenden Spiel gesperrt): einmal wiederholen reicht.
+const MAX_IO_ATTEMPTS: u32 = 2;
 const PROGRESS_INTERVAL_MS: u64 = 80;
 
 #[derive(Debug, Clone)]
@@ -185,6 +187,67 @@ fn secure_url(url: &str) -> Result<String> {
     }
 }
 
+// Tröpfelnde Downloads abbrechen und neu verbinden: Versuch 1 bis 3 unter 32 KB/s in 20 s, danach unter 4 KB/s
+// in 60 s. Bleibt es auch mit neuer Verbindung langsam, liegt es an der Leitung, dann 15 min nur die lockere Grenze.
+const TOO_SLOW: &str = "zu langsam";
+const SLOW_WINDOW: Duration = Duration::from_secs(20);
+const SLOW_MIN_BYTES: u64 = 32 * 1024 * 20;
+const CRAWL_WINDOW: Duration = Duration::from_secs(60);
+const CRAWL_MIN_BYTES: u64 = 4 * 1024 * 60;
+const SLOW_GUARDED_ATTEMPTS: u32 = 3;
+const _: () = assert!(SLOW_GUARDED_ATTEMPTS < MAX_ATTEMPTS);
+const SLOW_NETWORK_FOR: Duration = Duration::from_secs(15 * 60);
+
+fn is_too_slow(err: &Error) -> bool {
+    matches!(err, Error::Download { reason, .. } if reason == TOO_SLOW)
+}
+
+fn slow_network_until() -> &'static std::sync::Mutex<Option<Instant>> {
+    static UNTIL: OnceLock<std::sync::Mutex<Option<Instant>>> = OnceLock::new();
+    UNTIL.get_or_init(|| std::sync::Mutex::new(None))
+}
+
+pub(crate) fn slow_network() -> bool {
+    let until = slow_network_until().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    until.is_some_and(|t| Instant::now() < t)
+}
+
+fn mark_slow_network() {
+    tracing::info!("Langsame Leitung erkannt, strenge Tempo-Grenze für 15 Minuten aus");
+    *slow_network_until().lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Instant::now() + SLOW_NETWORK_FOR);
+}
+
+/// Das Chunk-Timeout greift nur, wenn gar nichts mehr kommt. Das hier fängt Verbindungen, die nur noch tröpfeln.
+pub(crate) struct SlowGuard {
+    window: Duration,
+    min_bytes: u64,
+    window_start: Instant,
+    window_bytes: u64,
+}
+
+impl SlowGuard {
+    pub(crate) fn new(strict: bool, now: Instant) -> Self {
+        let (window, min_bytes) = if strict { (SLOW_WINDOW, SLOW_MIN_BYTES) } else { (CRAWL_WINDOW, CRAWL_MIN_BYTES) };
+        Self { window, min_bytes, window_start: now, window_bytes: 0 }
+    }
+
+    fn paused(&mut self, waited: Duration) {
+        self.window_start += waited;
+    }
+
+    /// `true` = zu langsam, abbrechen.
+    pub(crate) fn add(&mut self, bytes: u64, remaining: Option<u64>, now: Instant) -> bool {
+        self.window_bytes += bytes;
+        if now.saturating_duration_since(self.window_start) < self.window {
+            return false;
+        }
+        let stuck = self.window_bytes < self.min_bytes && remaining.is_none_or(|r| r > 0);
+        self.window_start = now;
+        self.window_bytes = 0;
+        stuck
+    }
+}
+
 /// Wartezeit vor dem nächsten Versuch: Retry-After des Servers (höchstens
 /// 60 s), sonst exponentiell 1 s → 2 s → 4 s → … höchstens 30 s.
 fn retry_delay(err: &Error, attempt: u32) -> Duration {
@@ -199,6 +262,9 @@ fn retry_delay(err: &Error, attempt: u32) -> Duration {
 /// Wie viele Versuche lohnen sich? Dauerhafte Fehler (Datei gibt es nicht, kein Zugriff,
 /// ungültige Adresse) sofort melden, vorübergehende (Netz, Drosselung, Serverfehler) geduldig wiederholen.
 fn attempts_for(err: &Error) -> u32 {
+    if matches!(err, Error::Io { .. }) {
+        return MAX_IO_ATTEMPTS;
+    }
     let Error::Download { reason, .. } = err else { return MAX_ATTEMPTS };
     if reason.starts_with("nicht unterstütztes URL-Schema") {
         return 1;
@@ -216,6 +282,15 @@ fn attempts_for(err: &Error) -> u32 {
         }
     }
     MAX_ATTEMPTS
+}
+
+/// Gesamt-Timeout einer Anfrage. Hänger fangen Chunk-Timeout und [`SlowGuard`]; das hier ist nur die
+/// Obergrenze und muss auch bei der lockeren Tempo-Grenze reichen.
+fn request_timeout(size: Option<u64>) -> Duration {
+    match size {
+        Some(size) => Duration::from_secs(30 * 60 + size / (CRAWL_MIN_BYTES / CRAWL_WINDOW.as_secs())),
+        None => Duration::from_secs(24 * 60 * 60),
+    }
 }
 
 /// Ist der geladene Inhalt der richtige? Ohne `strict_size` zählt bei vorhandener Prüfsumme
@@ -256,6 +331,7 @@ async fn fetch_with_retries(
     on_bytes: &(dyn Fn(i64) + Sync),
 ) -> Result<()> {
     let mut attempt = 0;
+    let mut was_slow = false;
     loop {
         attempt += 1;
         // Abgebrochen oder pausiert? Dann keinen neuen Versuch starten.
@@ -265,9 +341,18 @@ async fn fetch_with_retries(
             counted.fetch_add(n, Ordering::Relaxed);
             on_bytes(n as i64);
         };
-        match fetch_attempt(http, task, &track).await {
-            Ok(()) => return Ok(()),
+        let guarded = attempt <= SLOW_GUARDED_ATTEMPTS && !slow_network();
+        match fetch_attempt(http, task, &track, guarded).await {
+            Ok(()) => {
+                if attempt > SLOW_GUARDED_ATTEMPTS && was_slow {
+                    mark_slow_network();
+                }
+                return Ok(());
+            }
             Err(e) => {
+                if is_too_slow(&e) {
+                    was_slow = true;
+                }
                 // Bereits gezählte Bytes des Fehlversuchs zurücknehmen.
                 on_bytes(-(counted.load(Ordering::Relaxed) as i64));
                 if matches!(e, Error::Cancelled) {
@@ -288,6 +373,7 @@ async fn fetch_attempt(
     http: &reqwest::Client,
     task: &Task,
     on_bytes: &(dyn Fn(u64) + Sync),
+    guarded: bool,
 ) -> Result<()> {
     let url = secure_url(&task.url)?;
     if task.pack && !allowed_pack_url(&url) {
@@ -302,7 +388,7 @@ async fn fetch_attempt(
         .get(&url)
         // Das globale Timeout wäre für große Dateien zu knapp; der Stream
         // unten hat stattdessen ein Timeout pro Chunk.
-        .timeout(Duration::from_secs(60 * 30))
+        .timeout(request_timeout(task.size))
         .send()
         .await
         .map_err(|e| Error::download(&url, e.without_url().to_string()))?;
@@ -331,10 +417,13 @@ async fn fetch_attempt(
         let mut hasher512 = task.sha512.is_some().then(sha2::Sha512::new);
         let mut written = 0u64;
         let mut stream = response.bytes_stream();
+        let mut slow = SlowGuard::new(guarded, Instant::now());
 
         loop {
             // Pause hält hier an, Abbruch endet hier.
+            let before = Instant::now();
             task::checkpoint().await?;
+            slow.paused(before.elapsed());
             let chunk = tokio::time::timeout(Duration::from_secs(30), stream.next())
                 .await
                 .map_err(|_| Error::download(&url, "Zeitüberschreitung"))?;
@@ -347,13 +436,26 @@ async fn fetch_attempt(
             file.write_all(&chunk).await.map_err(|e| Error::io(&tmp, e))?;
             written += chunk.len() as u64;
             on_bytes(chunk.len() as u64);
+            let remaining = task.size.map(|size| size.saturating_sub(written));
+            if slow.add(chunk.len() as u64, remaining, Instant::now()) {
+                return Err(Error::download(&url, TOO_SLOW));
+            }
         }
         file.flush().await.map_err(|e| Error::io(&tmp, e))?;
         drop(file);
 
         let sha512 = hasher512.map(|h| hex(&sha2::Digest::finalize(h)));
         check_content(task, &url, written, &hex(&hasher.finalize()), sha512.as_deref())?;
-        tokio::fs::rename(&tmp, &task.path).await.map_err(|e| Error::io(&task.path, e))
+        match tokio::fs::rename(&tmp, &task.path).await {
+            Ok(()) => Ok(()),
+            // Ziel gesperrt (laufendes Spiel), liegt aber schon richtig da.
+            Err(_) if (task.sha1.is_some() || task.sha512.is_some()) && is_valid(task, true).await => {
+                tracing::debug!("Ziel gesperrt, aber schon aktuell: {}", task.path.display());
+                let _ = tokio::fs::remove_file(&tmp).await;
+                Ok(())
+            }
+            Err(e) => Err(Error::io(&task.path, e)),
+        }
     }
     .await;
 
@@ -525,6 +627,41 @@ mod tests {
         assert_eq!(attempts_for(&e("Prüfsumme stimmt nicht")), MAX_CHECKSUM_ATTEMPTS);
         assert_eq!(attempts_for(&e("unerwartete Dateigröße")), MAX_CHECKSUM_ATTEMPTS);
         assert_eq!(attempts_for(&e("redirect-host")), 1);
+        let io = Error::io("x", std::io::Error::from(std::io::ErrorKind::PermissionDenied));
+        assert_eq!(attempts_for(&io), MAX_IO_ATTEMPTS);
+    }
+
+    #[test]
+    fn request_timeout_grows_with_size() {
+        assert_eq!(request_timeout(Some(0)), Duration::from_secs(30 * 60));
+        // 2 GB bei 4 KB/s: weit über 30 Minuten
+        assert!(request_timeout(Some(2_000_000_000)) > Duration::from_secs(100 * 3600));
+        assert!(request_timeout(None) >= Duration::from_secs(12 * 3600));
+    }
+
+    #[test]
+    fn slow_guard_breaks_off_a_stuck_connection_only() {
+        let t0 = Instant::now();
+        let s = |n: u64| t0 + Duration::from_secs(n);
+        let mut stuck = SlowGuard::new(true, t0);
+        assert!(!stuck.add(40_000, Some(190_000_000), s(10)));
+        assert!(stuck.add(46_000, Some(190_000_000), s(21)));
+        let mut fast = SlowGuard::new(true, t0);
+        assert!(!fast.add(5_000_000, Some(10_000_000), s(21)));
+        assert!(!fast.add(5_000_000, Some(0), s(42)));
+        let mut last = SlowGuard::new(true, t0);
+        assert!(!last.add(1_000, Some(0), s(25)));
+        let mut lenient = SlowGuard::new(false, t0);
+        assert!(!lenient.add(86_000, Some(1_000_000), s(21)));
+        assert!(!lenient.add(600_000, Some(1_000_000), s(61)));
+        let mut crawl = SlowGuard::new(false, t0);
+        assert!(crawl.add(100_000, Some(1_000_000), s(61)));
+        let mut paused = SlowGuard::new(true, t0);
+        paused.paused(Duration::from_secs(300));
+        assert!(!paused.add(1_000, Some(1_000_000), s(310)));
+        assert!(is_too_slow(&Error::download("https://x", TOO_SLOW)));
+        assert!(!is_too_slow(&Error::download("https://x", "Zeitüberschreitung")));
+        assert_eq!(attempts_for(&Error::download("https://x", TOO_SLOW)), MAX_ATTEMPTS);
     }
 
     #[test]

@@ -132,12 +132,30 @@ public final class ShareTest {
 				Component line = screenshotLine(file);
 				if (line != null) ChatLines.addMessage(line);
 				log("Bildschirmfoto-Zeile: " + (line != null) + ", Datei da: " + file.isFile());
+				// Echter Mausklick von außen (z. B. xdotool unter Xvfb): eigene Zeile, dann bei offenem Chat warten.
+				if (REAL_CLICK_PAUSE > 0) {
+					// Mit -PtrsSys.trsclient.autotest.share.sendChat=true als echte Chatnachricht (über den Server) – so sieht
+					// sie auch Xaero's Minimap, wenn installiert, und baut seine eigene Zeile mit „[Add]“.
+					if (Boolean.getBoolean("trsclient.autotest.share.sendChat")) Mc.sendChat(REAL_CLICK_LINE);
+					else ChatLines.addMessage(Mc.text("<Cleo> " + REAL_CLICK_LINE));
+				}
 				Mc.setScreen(chatScreen());
 				phase++;
 				wait = 10;
 				return;
 			}
 			case 4:
+				if (REAL_CLICK_PAUSE > 0 && !realClickAsked) {
+					realClickAsked = true;
+					shot(mc, "chat-real-click");
+					log("Echter Klick: bitte jetzt auf [Add] in der Zeile von Cleo klicken (" + REAL_CLICK_PAUSE + " Ticks)");
+					wait = REAL_CLICK_PAUSE;
+					return;
+				}
+				if (REAL_CLICK_PAUSE > 0) {
+					log("Echter Klick auf [Add]: „Klick“ gespeichert: " + hasWaypoint("Klick", "minecraft:overworld")
+							+ ", auf Minimap/Weltkarte sichtbar: " + shownOnMap("Klick"));
+				}
 				shot(mc, "chat-links");
 				// Klick auf die markierten Koordinaten (Stil aus der geschmückten Zeile).
 				log("Koordinaten-Klick: " + clickInsertion(Mc.text("x: 120 y: 70 z: -35"), "120 70 -35"));
@@ -300,6 +318,26 @@ public final class ShareTest {
 	/** Geteilter Wegpunkt von Xaero's Minimap bzw. JourneyMap im Chat. */
 	private static final String XAERO_LINE = "xaero-waypoint:Dorf:D:-1500:~:900:6:false:0:Internal-the-nether";
 	private static final String JOURNEYMAP_LINE = "[name:\"Turm\", x:40, y:90, z:-60, dim:minecraft:overworld]";
+	/** Wartezeit (Ticks) für einen echten Mausklick von außen auf „[Add]“, 0 = aus (-PtrsSys.trsclient.autotest.share.pause=…). */
+	private static final int REAL_CLICK_PAUSE = Integer.getInteger("trsclient.autotest.share.pause", 0);
+	/** Zeile für den echten Klick (eigener Name, damit sie von den anderen Schritten unterscheidbar bleibt). */
+	private static final String REAL_CLICK_LINE = "xaero-waypoint:Klick:K:500:70:500:10:false:0:Internal-overworld";
+	private boolean realClickAsked;
+
+	/** Wie die Minimap zeichnet: Wegpunkte der aktuellen Dimension, die angezeigt werden (Set sichtbar, nicht versteckt). */
+	private static boolean shownOnMap(String name) {
+		dev.theredstonee.trsclient.core.map.MapEngine e = dev.theredstonee.trsclient.core.map.MapEngine.get();
+		for (Waypoint w : e.waypoints()) if (w.name.equals(name) && e.waypointShown(w)) return true;
+		return false;
+	}
+
+	private static boolean hasWaypoint(String name, String dimension) {
+		for (Waypoint w : dev.theredstonee.trsclient.core.map.MapEngine.get().allWaypoints()) {
+			if (w.name.equals(name) && dimension.equals(WaypointShare.canonicalDimension(w.dimension))) return true;
+		}
+		return false;
+	}
+
 	/** Dritter Wegpunkt: direkt über „[Add]“ speichern (ohne Fenster). */
 	private static final String XAERO_ADD_LINE = "xaero-waypoint:Mine:M:300:12:-80:2:false:0:Internal-overworld";
 

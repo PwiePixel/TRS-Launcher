@@ -61,8 +61,7 @@ public final class ChatLinks {
 		if (message == null) return null;
 		try {
 			TrsModules m = modules();
-			// Koordinaten bzw. geteilte Wegpunkte im Text – oder Xaeros eigene Zeile mit „[Add]“ (Xaero's Minimap installiert).
-			boolean coords = coordsOn(m) && (!ChatCoords.find(message.getString()).isEmpty() || hasSharedClick(message));
+			boolean coords = coordsOn(m) && !ChatCoords.find(message.getString()).isEmpty();
 			String shot = screenshotName(message);
 			if (!coords && shot == null) return message;
 			MutableComponent out = coords ? withCoords(message) : message.copy();
@@ -89,15 +88,13 @@ public final class ChatLinks {
 	//? if >=1.16 {
 	// Koordinaten in Textstücken ohne eigene Klick-/Einfüge-Aktion unterstreichen und markieren. Geteilte Wegpunkte von
 	// Xaero's Minimap/JourneyMap: statt der Rohnachricht „… shared a waypoint called “Dorf” from Nether! [Add] · Xaero's
-	// Minimap“. Hat Xaero die Zeile schon selbst gebaut (sein „[Add]“ führt /xaero_waypoint_add:… aus), kommt
-	// „[Zu TRS hinzufügen]“ dahinter.
+	// Minimap“. Hat Xaero die Zeile schon selbst gebaut, bleibt sie, wie sie ist: ein Klick auf sein „[Add]“ trägt
+	// den Wegpunkt zusätzlich in die TRS-Karte ein (siehe onClick).
 	private static MutableComponent withCoords(Component message) {
 		final MutableComponent out = QolText.literal("");
 		final String hoverText = I18n.tr("chat.coords.hover");
-		final ChatWaypoints.Shared[] fromMod = {null};
 		message.visit((FormattedText.StyledContentConsumer<Object>) (style, text) -> {
 			if (text.isEmpty()) return Optional.empty();
-			if (fromMod[0] == null) fromMod[0] = ChatWaypoints.fromClickCommand(clickText(style.getClickEvent()));
 			List<ChatCoords.Hit> hits = style.getClickEvent() == null && style.getInsertion() == null ? ChatCoords.find(text)
 					: Collections.<ChatCoords.Hit>emptyList();
 			if (hits.isEmpty()) {
@@ -119,7 +116,6 @@ public final class ChatLinks {
 			if (pos < text.length()) out.append(QolText.literal(ChatText.activeCodes(text.substring(0, pos)) + text.substring(pos)).setStyle(style));
 			return Optional.empty();
 		}, Style.EMPTY);
-		if (fromMod[0] != null) out.append(part(ChatWaypoints.trsAddButton(fromMod[0]), Style.EMPTY, ""));
 		return out;
 	}
 
@@ -142,18 +138,9 @@ public final class ChatLinks {
 		}
 		if (p.insertion != null) st = st.withInsertion(p.insertion);
 		if (p.hover != null) st = st.withHoverEvent(hover(p.hover));
+		if (p.command != null) st = st.withClickEvent(runCommand(p.command));
 		boolean own = p.kind == ChatWaypoints.Part.Kind.ADD || p.kind == ChatWaypoints.Part.Kind.MOD;
 		return QolText.literal((own ? "" : codes) + p.text).setStyle(st);
-	}
-
-	// Gibt es in der Zeile einen Klick, der einen geteilten Wegpunkt hinzufügt (Xaeros „[Add]“)?
-	private static boolean hasSharedClick(Component message) {
-		final boolean[] found = {false};
-		message.visit((FormattedText.StyledContentConsumer<Object>) (style, text) -> {
-			if (!found[0] && ChatWaypoints.fromClickCommand(clickText(style.getClickEvent())) != null) found[0] = true;
-			return Optional.empty();
-		}, Style.EMPTY);
-		return found[0];
 	}
 
 	// Bildschirmfoto-Zeile: Stil mit „Datei öffnen“ auf eine Datei unter screenshots/ → relativer Name, sonst null.
@@ -175,16 +162,33 @@ public final class ChatLinks {
 	// Klick auf einen Stil im Chat (ohne Umschalt): unsere Marker behandeln. true = verbraucht. Stile mit eigener
 	// Klick-Aktion (Links des Servers) bleiben unberührt.
 	public static boolean onClick(Style style) {
-		if (style == null || style.getClickEvent() != null) return false;
+		if (style == null) return false;
+		try {
+			String command = clickText(style.getClickEvent());
+			// Xaeros eigenes „[Add]“ (Xaero's Minimap installiert): auch in die TRS-Karte eintragen – ein Knopf für beide.
+			// Nicht verbrauchen, damit Xaero den Wegpunkt wie gewohnt selbst übernimmt.
+			ChatWaypoints.Shared xaero = ChatWaypoints.fromClickCommand(command);
+			if (xaero != null) {
+				if (coordsOn(modules())) addToMap(xaero, false);
+				return false;
+			}
+			// Unser „[Hinzufügen]“ trägt eine echte Klick-Aktion (/trsclient-waypoint-add …): abfangen, nie an den Server.
+			ChatWaypoints.Shared own = ChatWaypoints.parseAddCommand(command);
+			if (own != null) {
+				addToMap(own, true);
+				return true;
+			}
+		} catch (RuntimeException e) {
+			TrsClient.LOGGER.error("Chat-Klick fehlgeschlagen", e);
+		}
+		if (style.getClickEvent() != null) return false;
 		String ins = style.getInsertion();
 		if (ins == null) return false;
 		try {
 			boolean coords = coordsOn(modules());
-			// „[Add]“ bzw. „[Zu TRS hinzufügen]“: sofort auf die Karte, Hinweis in der Aktionsleiste.
 			ChatWaypoints.Shared add = coords ? ChatWaypoints.parseAddMarker(ins) : null;
 			if (add != null) {
-				saveHost().playClick();
-				notice(dev.theredstonee.trsclient.core.waypoint.WaypointShare.addShared(add));
+				addToMap(add, true);
 				return true;
 			}
 			ChatWaypoints.Shared shared = coords ? ChatWaypoints.parse(ins) : null;
@@ -245,6 +249,10 @@ public final class ChatLinks {
 		return e instanceof ClickEvent.OpenFile ? ((ClickEvent.OpenFile) e).path() : null;
 	}
 
+	private static ClickEvent runCommand(String command) {
+		return new ClickEvent.RunCommand(command);
+	}
+
 	// Text eines Befehls-Klicks (andere Mods, z. B. Xaeros „[Add]“), sonst null.
 	private static String clickText(ClickEvent e) {
 		if (e instanceof ClickEvent.RunCommand) return ((ClickEvent.RunCommand) e).command();
@@ -258,6 +266,10 @@ public final class ChatLinks {
 	*///?} elif >=1.16 {
 	private static String openFile(ClickEvent e) {
 		return e != null && e.getAction() == ClickEvent.Action.OPEN_FILE ? e.getValue() : null;
+	}
+
+	private static ClickEvent runCommand(String command) {
+		return new ClickEvent(ClickEvent.Action.RUN_COMMAND, command);
 	}
 
 	// Text eines Befehls-Klicks (andere Mods, z. B. Xaeros „[Add]“), sonst null.
@@ -282,6 +294,23 @@ public final class ChatLinks {
 		*///?} else
 		Mc.mc().gui.setOverlayMessage(QolText.plain(text), false);
 	}
+
+	//? if >=1.16 {
+	/**
+	 * Geteilten Wegpunkt sofort auf die TRS-Karte (Minimap + Weltkarte) legen; Rückmeldung in der Aktionsleiste, im Chat
+	 * und in latest.log. {@code click}: Klick-Ton (bei Xaeros „[Add]“ spielt Minecraft ihn selbst).
+	 */
+	public static void addToMap(ChatWaypoints.Shared add, boolean click) {
+		if (click) saveHost().playClick();
+		String result = dev.theredstonee.trsclient.core.waypoint.WaypointShare.addShared(add);
+		TrsClient.LOGGER.info("[Chat] [Add] {} → {} (Welt {}, hier {})", add, result,
+				dev.theredstonee.trsclient.core.waypoint.WaypointShare.currentWorldKey(),
+				dev.theredstonee.trsclient.core.waypoint.WaypointShare.currentDimension());
+		// Rückmeldung als Chatzeile: die Aktionsleiste ist bei offenem Chat nicht zu sehen.
+		notice(result);
+		ChatLines.addMessage(QolText.literal("[TRS] " + result).setStyle(Style.EMPTY.applyFormat(ChatFormatting.GREEN)));
+	}
+	//?}
 
 	/** Fenster „Als Wegpunkt speichern“ (ersetzt den Chat). */
 	public static void openSave(int x, int y, int z) {

@@ -105,7 +105,6 @@ public final class ChatCompat {
 		if (original == null) return false;
 		TextComponentString out = new TextComponentString("");
 		boolean changed = false;
-		dev.theredstonee.trsclient.core.chat.ChatWaypoints.Shared fromMod = null;
 		for (ITextComponent part : original) {
 			String text = part.getUnformattedComponentText();
 			net.minecraft.util.text.Style style = part.getStyle().createDeepCopy();
@@ -113,7 +112,6 @@ public final class ChatCompat {
 					&& style.getInsertion() == null ? dev.theredstonee.trsclient.core.chat.ChatCoords.find(text)
 					: java.util.Collections.<dev.theredstonee.trsclient.core.chat.ChatCoords.Hit>emptyList();
 			int pos = 0;
-			if (fromMod == null) fromMod = dev.theredstonee.trsclient.core.chat.ChatWaypoints.fromClickCommand(clickText(style.getClickEvent()));
 			for (dev.theredstonee.trsclient.core.chat.ChatCoords.Hit h : hits) {
 				if (h.start > pos) out.appendSibling(new TextComponentString(text.substring(pos, h.start)).setStyle(style.createShallowCopy()));
 				if (h.shared != null) {
@@ -134,11 +132,6 @@ public final class ChatCompat {
 			}
 			if (pos < text.length()) out.appendSibling(new TextComponentString(text.substring(pos)).setStyle(style.createShallowCopy()));
 		}
-		// Xaeros eigene Zeile („[Add]“ führt /xaero_waypoint_add:… aus): „[Zu TRS hinzufügen]“ dahinter.
-		if (fromMod != null) {
-			out.appendSibling(part(dev.theredstonee.trsclient.core.chat.ChatWaypoints.trsAddButton(fromMod), new net.minecraft.util.text.Style()));
-			changed = true;
-		}
 		if (changed) event.setMessage(out);
 		return changed;
 		*///?} else {
@@ -146,7 +139,6 @@ public final class ChatCompat {
 		if (original == null) return false;
 		ChatComponentText out = new ChatComponentText("");
 		boolean changed = false;
-		dev.theredstonee.trsclient.core.chat.ChatWaypoints.Shared fromMod = null;
 		for (IChatComponent part : original) {
 			String text = part.getUnformattedTextForChat();
 			net.minecraft.util.ChatStyle style = part.getChatStyle().createDeepCopy();
@@ -154,7 +146,6 @@ public final class ChatCompat {
 					&& style.getInsertion() == null ? dev.theredstonee.trsclient.core.chat.ChatCoords.find(text)
 					: java.util.Collections.<dev.theredstonee.trsclient.core.chat.ChatCoords.Hit>emptyList();
 			int pos = 0;
-			if (fromMod == null) fromMod = dev.theredstonee.trsclient.core.chat.ChatWaypoints.fromClickCommand(clickText(style.getChatClickEvent()));
 			for (dev.theredstonee.trsclient.core.chat.ChatCoords.Hit h : hits) {
 				if (h.start > pos) out.appendSibling(new ChatComponentText(text.substring(pos, h.start)).setChatStyle(style.createShallowCopy()));
 				if (h.shared != null) {
@@ -174,11 +165,6 @@ public final class ChatCompat {
 				changed = true;
 			}
 			if (pos < text.length()) out.appendSibling(new ChatComponentText(text.substring(pos)).setChatStyle(style.createShallowCopy()));
-		}
-		// Xaeros eigene Zeile („[Add]“ führt /xaero_waypoint_add:… aus): „[Zu TRS hinzufügen]“ dahinter.
-		if (fromMod != null) {
-			out.appendSibling(part(dev.theredstonee.trsclient.core.chat.ChatWaypoints.trsAddButton(fromMod), new net.minecraft.util.ChatStyle()));
-			changed = true;
 		}
 		if (changed) event.message = out;
 		return changed;
@@ -279,22 +265,14 @@ public final class ChatCompat {
 		//?}
 	}
 
-	/** Gibt es in der Nachricht einen Klick, der einen geteilten Wegpunkt hinzufügt (Xaeros „[Add]“)? */
-	public static boolean hasSharedClick(ClientChatReceivedEvent event) {
+	/** Eigene, einfache Chatzeile (Formatcodes mit § erlaubt), z. B. die Rückmeldung nach „[Add]“. */
+	public static void printPlain(String text) {
+		GuiNewChat gui = chat();
+		if (gui == null) return;
 		//? if >=1.9 {
-		/*ITextComponent original = event.getMessage();
-		if (original == null) return false;
-		for (ITextComponent part : original) {
-			if (dev.theredstonee.trsclient.core.chat.ChatWaypoints.fromClickCommand(clickText(part.getStyle().getClickEvent())) != null) return true;
-		}
-		return false;
+		/*gui.printChatMessage(new TextComponentString(text));
 		*///?} else {
-		IChatComponent original = event.message;
-		if (original == null) return false;
-		for (IChatComponent part : original) {
-			if (dev.theredstonee.trsclient.core.chat.ChatWaypoints.fromClickCommand(clickText(part.getChatStyle().getChatClickEvent())) != null) return true;
-		}
-		return false;
+		gui.printChatMessage(new ChatComponentText(text));
 		//?}
 	}
 
@@ -367,6 +345,19 @@ public final class ChatCompat {
 		IChatComponent c = gui.getChatComponent(rawMouseX, rawMouseY);
 		//?}
 		return c == null ? null : c.getUnformattedText();
+	}
+
+	/** Befehl der Klick-Aktion unter der Maus (z. B. Xaeros „[Add]“: /xaero_waypoint_add:…) oder null. */
+	public static String clickCommandAt(int rawMouseX, int rawMouseY) {
+		GuiNewChat gui = chat();
+		if (gui == null) return null;
+		//? if >=1.9 {
+		/*ITextComponent c = gui.getChatComponent(rawMouseX, rawMouseY);
+		return c == null ? null : clickText(c.getStyle().getClickEvent());
+		*///?} else {
+		IChatComponent c = gui.getChatComponent(rawMouseX, rawMouseY);
+		return c == null ? null : clickText(c.getChatStyle().getChatClickEvent());
+		//?}
 	}
 
 	/**

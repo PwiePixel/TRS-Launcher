@@ -326,8 +326,15 @@ public final class WaypointShare {
 				dev.theredstonee.trsclient.core.chat.ChatWaypoints.displayName(s), dev.theredstonee.trsclient.core.social.SafeText.MAX_NAME);
 		if (name == null || name.isEmpty()) name = dev.theredstonee.trsclient.core.i18n.I18n.tr("waypoint.save.defaultName");
 		Result r = saveShared(name, s.x, s.hasY ? s.y : playerBlockY(), s.z, s.dimension, s.color, s.mark);
-		return r == Result.ADDED || r == Result.ALREADY ? dev.theredstonee.trsclient.core.i18n.I18n.tr(r.key(), name)
-				: dev.theredstonee.trsclient.core.i18n.I18n.tr(r.key());
+		if (r != Result.ADDED && r != Result.ALREADY) return dev.theredstonee.trsclient.core.i18n.I18n.tr(r.key());
+		String text = dev.theredstonee.trsclient.core.i18n.I18n.tr(r.key(), name) + " · "
+				+ dev.theredstonee.trsclient.core.chat.ChatWaypoints.details(s);
+		// Andere Dimension als die aktuelle: dort gespeichert, auf Minimap/Weltkarte erst dort zu sehen.
+		String here = canonicalDimension(currentDimension());
+		if (s.dimension != null && here != null && !s.dimension.equals(here)) {
+			text += " – " + dev.theredstonee.trsclient.core.i18n.I18n.tr("chat.waypoint.otherDimension", WorldMapUi.dimensionName(s.dimension));
+		}
+		return text;
 	}
 
 	/** Blockhöhe der Füße des Spielers (für geteilte Wegpunkte ohne Höhe), 64 ohne Welt. */

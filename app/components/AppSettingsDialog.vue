@@ -115,9 +115,11 @@ async function save() {
     return
   }
   const json = JSON.stringify(form.value)
+  const before = JSON.parse(lastSaved) as Settings
   status.value = { ok: true, state: 'saving' }
   try {
-    await store.save(parsed.data as Settings)
+    // Nur eigene Änderungen – was inzwischen woanders gespeichert wurde, bleibt.
+    await store.update((cur) => mergeChanges(cur, before, parsed.data as Settings))
     lastSaved = json
     status.value = { ok: true, state: 'saved' }
   } catch (e) {
@@ -261,8 +263,7 @@ function installJava(slot: (typeof javaSlots)[number]) {
         // Offener Dialog: über das Formular (speichert selbst).
         javaModels[slot.key].value = path
       } else {
-        const current = store.current ?? (await store.load())
-        await store.save({ ...current, java: { ...current.java, [slot.key]: path } })
+        await store.update((cur) => ({ ...cur, java: { ...cur.java, [slot.key]: path } }))
       }
       return path
     },
@@ -334,6 +335,12 @@ async function clean() {
     cleaning.value = false
   }
 }
+const sharingLauncherLog = ref(false)
+
+function openLauncherLogs() {
+  backend.openLauncherLogFolder().catch((e) => toasts.error(e))
+}
+
 function openDataDir() {
   backend.openDataDir().catch(() => {})
 }
@@ -636,7 +643,14 @@ async function allowFirewall() {
       <SettingRow :title="t('settings.privacy.telemetryTitle')" :description="t('settings.privacy.telemetryDescription')">
         <ToggleSwitch :model-value="false" :label="t('settings.privacy.telemetryTitle')" disabled />
       </SettingRow>
+      <SettingRow v-if="!mobileOs" :title="t('settings.privacy.launcherLogTitle')" :description="t('settings.privacy.launcherLogDescription')">
+        <div class="flex gap-2">
+          <button class="btn btn-ghost" @click="openLauncherLogs">{{ t('common.actions.openFolder') }}</button>
+          <button class="btn btn-ghost" :disabled="!form.allowLogUpload" @click="sharingLauncherLog = true">{{ t('settings.privacy.shareLauncherLog') }}</button>
+        </div>
+      </SettingRow>
       <TrsPrivacySettings v-model:sync="form.trsSync" />
+      <LogShareDialog v-if="sharingLauncherLog" instance-id="" source="launcher" :label="t('settings.privacy.launcherLogTitle')" @close="sharingLauncherLog = false" />
     </div>
 
     <!-- Standard-Einstellungen ------------------------------------------------------ -->

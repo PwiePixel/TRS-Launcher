@@ -53,7 +53,7 @@ public final class ChatFeatures {
 		dev.theredstonee.trsclient.core.cinematic.Cinematic.serverText(ChatCompat.formatted(event));
 		long now = System.currentTimeMillis();
 		// Koordinaten anklickbar machen („Als Wegpunkt speichern“, nur lokal).
-		if (modules.chat.isEnabled() && modules.chatCoordLinks.get() && (!ChatCoords.find(plain).isEmpty() || ChatCompat.hasSharedClick(event))) {
+		if (modules.chat.isEnabled() && modules.chatCoordLinks.get() && !ChatCoords.find(plain).isEmpty()) {
 			try {
 				ChatCompat.markCoords(event, I18n.tr("chat.coords.hover"));
 			} catch (RuntimeException e) {
@@ -175,12 +175,27 @@ public final class ChatFeatures {
 	public boolean onLinkClick(int rawMouseX, int rawMouseY) {
 		if (!modules.chat.isEnabled() || !modules.chatCoordLinks.get()) return false;
 		try {
+			// Xaeros eigenes „[Add]“ (Xaero's Minimap installiert): auch in die TRS-Karte – ein Knopf für beide. Nicht
+			// verbrauchen, damit Xaero den Wegpunkt selbst übernimmt.
+			ChatWaypoints.Shared xaero = ChatWaypoints.fromClickCommand(ChatCompat.clickCommandAt(rawMouseX, rawMouseY));
+			if (xaero != null) {
+				String result = dev.theredstonee.trsclient.core.waypoint.WaypointShare.addShared(xaero);
+				TrsClient.LOGGER.info("[Chat] [Add] {} → {} (Xaero-Knopf)", xaero, result);
+				saveHost().notice(result);
+				ChatCompat.printPlain("§a[TRS] " + result);
+				return false;
+			}
 			String insertion = ChatCompat.insertionAt(rawMouseX, rawMouseY);
-			// „[Add]“ bzw. „[Zu TRS hinzufügen]“: sofort auf die Karte, Hinweis in der Aktionsleiste.
+			// „[Hinzufügen]“: sofort auf die Karte, Hinweis in der Aktionsleiste und im Chat.
 			ChatWaypoints.Shared add = ChatWaypoints.parseAddMarker(insertion);
 			if (add != null) {
 				saveHost().playClick();
-				saveHost().notice(dev.theredstonee.trsclient.core.waypoint.WaypointShare.addShared(add));
+				String result = dev.theredstonee.trsclient.core.waypoint.WaypointShare.addShared(add);
+				TrsClient.LOGGER.info("[Chat] [Add] {} → {} (Welt {}, hier {})", add, result,
+						dev.theredstonee.trsclient.core.waypoint.WaypointShare.currentWorldKey(),
+						dev.theredstonee.trsclient.core.waypoint.WaypointShare.currentDimension());
+				saveHost().notice(result);
+				ChatCompat.printPlain("§a[TRS] " + result);
 				return true;
 			}
 			ChatWaypoints.Shared shared = ChatWaypoints.parse(insertion);
