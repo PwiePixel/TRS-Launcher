@@ -2733,7 +2733,6 @@
   "reels.empty.hint": "Haz la primera con la cámara.",
   "reels.hint.keys": "Rueda: foto siguiente · Intro: comentar · {0}: girar · {1}: guardar",
   "reels.nav.feed": "Feed",
-  "reels.nav.camera": "Cámara",
   "reels.nav.rotate": "Girar",
   "reels.ago.now": "ahora mismo",
   "reels.ago.min": "hace {0} min",
@@ -2741,7 +2740,6 @@
   "reels.ago.days": "hace {0} d",
   "reels.meta.phone": "con el móvil en el juego",
   "reels.meta.selfie": "Selfi",
-  "reels.streak.days": "{0} días",
   "reels.comments": "Comentarios",
   "reels.comment.none": "Aún no hay comentarios",
   "reels.comment.hint": "Escribe un comentario …",
@@ -2761,5 +2759,6 @@
   "reels.compose.local": "Por ahora se queda en este PC.",
   "reels.toast.posted": "¡Publicado! Racha: {0} días",
   "reels.toast.posted.one": "¡Publicado! Racha: {0} día",
-  "reels.toast.failed": "No se pudo guardar la foto."
+  "reels.toast.failed": "No se pudo guardar la foto.",
+  "reels.toast.readonly": "No se pueden hacer fotos en una segunda ventana del juego."
 }

@@ -2733,7 +2733,6 @@
   "reels.empty.hint": "Take your first one with the camera.",
   "reels.hint.keys": "Wheel: next photo · Enter: comment · {0}: rotate · {1}: put away",
   "reels.nav.feed": "Feed",
-  "reels.nav.camera": "Camera",
   "reels.nav.rotate": "Rotate",
   "reels.ago.now": "just now",
   "reels.ago.min": "{0} min ago",
@@ -2741,7 +2740,6 @@
   "reels.ago.days": "{0} d ago",
   "reels.meta.phone": "with the phone in the game",
   "reels.meta.selfie": "Selfie",
-  "reels.streak.days": "{0} days",
   "reels.comments": "Comments",
   "reels.comment.none": "No comments yet",
   "reels.comment.hint": "Write a comment …",
@@ -2761,5 +2759,6 @@
   "reels.compose.local": "Stays on this PC for now.",
   "reels.toast.posted": "Posted! Streak: {0} days",
   "reels.toast.posted.one": "Posted! Streak: {0} day",
-  "reels.toast.failed": "The photo could not be saved."
+  "reels.toast.failed": "The photo could not be saved.",
+  "reels.toast.readonly": "Photos are not possible in a second game window."
 }

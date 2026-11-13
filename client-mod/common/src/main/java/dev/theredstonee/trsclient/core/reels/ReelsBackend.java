@@ -46,6 +46,14 @@ public interface ReelsBackend {
 	/** Wohin die Kamera das Foto mit dieser ID schreibt (null bei ungültiger ID). */
 	Path newPhotoFile(String id);
 
+	/**
+	 * Lassen sich Änderungen gerade nicht sichern (lokal: Zweitfenster derselben Instanz)? Dann nimmt die Kamera kein
+	 * Foto auf – der Post wäre nach dem nächsten Start wieder weg und das Foto bliebe ohne Post liegen.
+	 */
+	default boolean readOnly() {
+		return false;
+	}
+
 	/** Ausstehende Änderungen sichern (Platte bzw. Server). Darf von einem Hintergrund-Thread kommen. */
 	void flush() throws IOException;
 }

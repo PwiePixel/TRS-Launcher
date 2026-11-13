@@ -573,6 +573,184 @@ class ReelsStoreTest {
 		assertSame(reels.worker(), reels.worker());
 	}
 
+	// --- Fotos, auf die niemand mehr wartet ---
+
+	/** Hintergrund-Thread von Hand: Aufträge sammeln und einzeln ausführen. */
+	private static final class Manual implements Executor {
+		final java.util.ArrayDeque<Runnable> jobs = new java.util.ArrayDeque<Runnable>();
+
+		@Override
+		public void execute(Runnable r) {
+			jobs.add(r);
+		}
+	}
+
+	private List<String> photoFiles() {
+		List<String> names = new ArrayList<String>();
+		java.io.File[] files = tmp.resolve("photos").toFile().listFiles();
+		if (files != null) for (java.io.File f : files) names.add(f.getName());
+		return names;
+	}
+
+	@Test
+	void abandonedPhotoIsDeletedByTheWorkerInsteadOfBeingLeftOnDisk() {
+		Manual worker = new Manual();
+		Reels reels = Reels.forTest(new TrsModules(), new LocalReelsBackend(tmp, UTC), worker, UTC);
+		long first = reels.savePhoto(testFrame(64, 36), 64, 36, PhoneHold.LANDSCAPE, false, null);
+		assertTrue(first > 0);
+		reels.abandon(first);
+		worker.jobs.poll().run();
+		assertNull(reels.pollShot(), "auf das Foto wartet niemand: es kommt nicht mehr an");
+		assertTrue(photoFiles().isEmpty(), "und die Datei ist wieder weg: " + photoFiles());
+
+		// Ein neueres Foto verdrängt ein älteres, das noch gespeichert wird; „abandon“ des alten lässt das neue in Ruhe.
+		long old = reels.savePhoto(testFrame(64, 36), 64, 36, PhoneHold.LANDSCAPE, false, null);
+		long fresh = reels.savePhoto(testFrame(32, 18), 32, 18, PhoneHold.LANDSCAPE, true, null);
+		assertNotEquals(old, fresh, "jedes Auslösen hat seine eigene Nummer");
+		reels.abandon(old);
+		worker.jobs.poll().run();
+		assertNull(reels.pollShot());
+		assertTrue(photoFiles().isEmpty());
+		worker.jobs.poll().run();
+		Reels.Shot shot = reels.pollShot();
+		assertNotNull(shot);
+		assertEquals(fresh, shot.ticket);
+		assertEquals(32, shot.width);
+		assertEquals(1, photoFiles().size());
+
+		// Ein fehlgeschlagenes Foto trägt die Nummer seines Auslösens (damit die Kamera die Meldung zuordnen kann).
+		long broken = reels.savePhoto(new int[4], 1920, 1080, PhoneHold.LANDSCAPE, false, null);
+		worker.jobs.poll().run();
+		Reels.Shot failed = reels.pollShot();
+		assertTrue(failed.failed);
+		assertEquals(broken, failed.ticket);
+	}
+
+	@Test
+	void stoppingTheGameLeavesNoPhotoWithoutAPostAndSavesTheFeed() throws IOException {
+		LocalReelsBackend backend = new LocalReelsBackend(tmp, UTC);
+		Manual worker = new Manual();
+		Reels reels = Reels.forTest(new TrsModules(), backend, worker, UTC);
+		// Ein gepostetes Foto, eines fertig in der Warteschlange, eines noch beim Speichern.
+		reels.savePhoto(testFrame(64, 36), 64, 36, PhoneHold.LANDSCAPE, false, null);
+		worker.jobs.poll().run();
+		Reels.Shot posted = reels.pollShot();
+		assertNotNull(reels.post(posted, "bleibt", "A", NOON));
+		reels.savePhoto(testFrame(64, 36), 64, 36, PhoneHold.LANDSCAPE, false, null);
+		worker.jobs.pollLast().run();
+		reels.savePhoto(testFrame(64, 36), 64, 36, PhoneHold.LANDSCAPE, false, null);
+		Runnable writing = worker.jobs.pollLast();
+		assertEquals(2, photoFiles().size(), "das gepostete und das fertige, noch nicht abgeholte: " + photoFiles());
+
+		reels.stop(0);
+		assertNull(reels.pollShot());
+		assertEquals(Collections.singletonList(posted.fileName), photoFiles(), "nur das gepostete Foto bleibt");
+		assertEquals(1, new LocalReelsBackend(tmp, UTC).feed().size(), "der Feed ist gesichert");
+		// Was danach noch fertig wird, räumt der Hintergrund-Thread selbst weg.
+		writing.run();
+		assertNull(reels.pollShot());
+		assertEquals(Collections.singletonList(posted.fileName), photoFiles());
+	}
+
+	@Test
+	void stopWaitsForTheRealWorkerSoAHalfWrittenPhotoIsGone() {
+		Reels reels = Reels.forTest(new TrsModules(), new LocalReelsBackend(tmp, UTC), null, UTC);
+		reels.savePhoto(testFrame(640, 360), 640, 360, PhoneHold.LANDSCAPE, false, null);
+		reels.stop(10000);
+		assertNull(reels.pollShot());
+		assertTrue(photoFiles().isEmpty(), "beim Beenden bleibt kein Foto ohne Post: " + photoFiles());
+	}
+
+	// --- Sichern ---
+
+	@Test
+	void postCountsForOneDayOnlyAfterTheTimeZoneChanged() throws IOException {
+		// 00:30 in Berlin am 14.11. ist 23:30 UTC am 13.11.
+		TimeZone berlin = TimeZone.getTimeZone("Europe/Berlin");
+		long halfPastMidnight = NOON + 11 * 3600000L + 30 * 60000L;
+		LocalReelsBackend a = new LocalReelsBackend(tmp, berlin);
+		assertNotNull(a.post(photo(1), 1280, 720, false, false, "", "A", halfPastMidnight));
+		assertEquals(1, a.streak(halfPastMidnight + 60000L));
+		a.flush();
+		assertFalse(new String(Files.readAllBytes(tmp.resolve("feed.json")), StandardCharsets.UTF_8).contains("postDays"),
+				"die Tage stehen nicht in der Datei – sie ergeben sich aus den Posts");
+
+		// Derselbe Feed, der PC steht jetzt auf UTC: ein Post, ein Tag – nicht zwei.
+		LocalReelsBackend b = new LocalReelsBackend(tmp, UTC);
+		assertEquals(1, b.streak(halfPastMidnight + 60000L));
+		assertEquals(1, b.streak(NOON + DAY), "am Tag danach (UTC) läuft sie noch");
+		assertEquals(0, b.streak(NOON + 2 * DAY));
+
+		// Eine ältere Datei mit gespeicherten Tagen aus einer anderen Zeitzone: sie zählen nicht mehr mit.
+		String json = new String(Files.readAllBytes(tmp.resolve("feed.json")), StandardCharsets.UTF_8);
+		long day = halfPastMidnight / DAY;
+		json = json.substring(0, json.lastIndexOf('}')) + ",\n  \"postDays\": [" + day + ", " + (day + 1) + "]\n}";
+		Files.write(tmp.resolve("feed.json"), json.getBytes(StandardCharsets.UTF_8));
+		LocalReelsBackend c = new LocalReelsBackend(tmp, UTC);
+		assertEquals(1, c.feed().size());
+		assertEquals(1, c.streak(halfPastMidnight + 60000L), "ein Post zählt für genau einen Tag");
+	}
+
+	@Test
+	void failedWriteKeepsTheChangeForTheNextTry() throws IOException {
+		// „feed.json“ ist ein Ordner: Schreiben schlägt fehl.
+		Path dir = tmp.resolve("kaputt");
+		Files.createDirectories(dir.resolve("feed.json").resolve("x"));
+		LocalReelsBackend a = new LocalReelsBackend(dir, UTC);
+		a.post(photo(1), 1280, 720, false, false, "bleibt", "A", NOON);
+		assertThrows(IOException.class, new org.junit.jupiter.api.function.Executable() {
+			@Override
+			public void execute() throws Throwable {
+				a.flush();
+			}
+		});
+		assertTrue(a.dirty(), "nicht geschrieben: die Änderung gilt weiter als ungesichert");
+		Files.delete(dir.resolve("feed.json").resolve("x"));
+		Files.delete(dir.resolve("feed.json"));
+		a.flush();
+		assertFalse(a.dirty());
+		assertEquals("bleibt", new LocalReelsBackend(dir, UTC).feed().get(0).caption);
+	}
+
+	@Test
+	void feedNeverWaitsForTheDiskWhileTheFeedIsBeingWritten() throws Exception {
+		final LocalReelsBackend a = new LocalReelsBackend(tmp, UTC);
+		for (int i = 0; i < 300; i++) {
+			ReelsPost p = a.post(photo(i + 1), 1280, 720, false, false, "Post " + i, "A", NOON - i * 1000L);
+			for (int k = 0; k < 20; k++) a.comment(p.id, "B", "Kommentar " + k, NOON);
+		}
+		// Ein fremder Thread hält die Sperre des Feeds nicht, während geschrieben wird: feed() und Likes laufen durch.
+		final java.util.concurrent.atomic.AtomicBoolean stop = new java.util.concurrent.atomic.AtomicBoolean();
+		final java.util.concurrent.atomic.AtomicReference<Throwable> error = new java.util.concurrent.atomic.AtomicReference<Throwable>();
+		Thread writer = new Thread(new Runnable() {
+			@Override
+			public void run() {
+				try {
+					while (!stop.get()) {
+						a.flush();
+					}
+				} catch (Throwable t) {
+					error.set(t);
+				}
+			}
+		}, "test-flush");
+		writer.start();
+		String id = a.feed().get(0).id;
+		for (int i = 0; i < 200; i++) {
+			assertEquals(300, a.feed().size());
+			a.toggleLike(id);
+		}
+		stop.set(true);
+		writer.join(20000);
+		assertNull(error.get(), "Sichern neben Änderungen: " + error.get());
+		a.flush();
+		assertFalse(a.dirty());
+		LocalReelsBackend b = new LocalReelsBackend(tmp, UTC);
+		assertEquals(300, b.feed().size());
+		assertEquals(a.feed().get(0).likes, b.feed().get(0).likes, "der letzte Stand steht auf der Platte");
+		assertEquals(20, b.feed().get(0).comments.size());
+	}
+
 	// --- Tastensperre ---
 
 	@Test

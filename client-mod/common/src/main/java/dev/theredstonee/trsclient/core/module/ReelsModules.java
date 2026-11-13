@@ -25,7 +25,10 @@ public final class ReelsModules {
 	}
 
 	public final Module reels;
-	/** Taste „Handy öffnen“ (ohne Vanilla-Belegung; dieselbe Taste steckt es wieder weg). */
+	/**
+	 * Taste „Handy öffnen“ (dieselbe Taste steckt es wieder weg). Ab Werk K: weder Minecraft noch ein anderes
+	 * TRS-Modul belegt sie – H gehört schon der Schaltungs-Bibliothek („Vorlage aus-/einblenden“).
+	 */
 	public final KeySetting openKey;
 	/** Taste „Handy drehen“ – wird nur gelesen, solange das Handy offen ist. */
 	public final KeySetting rotateKey;
@@ -36,7 +39,7 @@ public final class ReelsModules {
 		reels = registry.register(new Module("mcReels", "MC-Reels",
 				"Take out a phone in the game: a photo feed, a camera with selfie mode, posts with a caption and a streak. "
 						+ "First test version – everything stays on this PC.", false));
-		openKey = reels.add(new KeySetting("key", "Open phone", "key.keyboard.h"));
+		openKey = reels.add(new KeySetting("key", "Open phone", "key.keyboard.k"));
 		rotateKey = reels.add(new KeySetting("rotateKey", "Rotate phone", "key.keyboard.r"));
 		hold = reels.add(new ChoiceSetting<PhoneHold>("hold", "Hold", PhoneHold.class, PhoneHold.LANDSCAPE));
 		reels.icon("camera").category(Category.MISC).availableWhen(new java.util.concurrent.Callable<Boolean>() {

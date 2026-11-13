@@ -2733,7 +2733,6 @@
   "reels.empty.hint": "Mach dein erstes mit der Kamera.",
   "reels.hint.keys": "Mausrad: nächstes Foto · Enter: Kommentar · {0}: drehen · {1}: Handy weg",
   "reels.nav.feed": "Feed",
-  "reels.nav.camera": "Kamera",
   "reels.nav.rotate": "Drehen",
   "reels.ago.now": "gerade eben",
   "reels.ago.min": "vor {0} Min.",
@@ -2741,7 +2740,6 @@
   "reels.ago.days": "vor {0} T.",
   "reels.meta.phone": "mit dem Handy im Spiel",
   "reels.meta.selfie": "Selfie",
-  "reels.streak.days": "{0} Tage",
   "reels.comments": "Kommentare",
   "reels.comment.none": "Noch keine Kommentare",
   "reels.comment.hint": "Schreib einen Kommentar …",
@@ -2761,5 +2759,6 @@
   "reels.compose.local": "Bleibt vorerst auf diesem PC.",
   "reels.toast.posted": "Gepostet! Streak: {0} Tage",
   "reels.toast.posted.one": "Gepostet! Streak: {0} Tag",
-  "reels.toast.failed": "Das Foto konnte nicht gespeichert werden."
+  "reels.toast.failed": "Das Foto konnte nicht gespeichert werden.",
+  "reels.toast.readonly": "Fotos gehen im zweiten Spielfenster nicht."
 }

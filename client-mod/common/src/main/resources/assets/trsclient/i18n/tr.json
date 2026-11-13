@@ -2733,7 +2733,6 @@
   "reels.empty.hint": "İlkini kamerayla çek.",
   "reels.hint.keys": "Tekerlek: sonraki fotoğraf · Enter: yorum · {0}: döndür · {1}: kaldır",
   "reels.nav.feed": "Akış",
-  "reels.nav.camera": "Kamera",
   "reels.nav.rotate": "Döndür",
   "reels.ago.now": "az önce",
   "reels.ago.min": "{0} dk önce",
@@ -2741,7 +2740,6 @@
   "reels.ago.days": "{0} g önce",
   "reels.meta.phone": "oyunda telefonla",
   "reels.meta.selfie": "Selfie",
-  "reels.streak.days": "{0} gün",
   "reels.comments": "Yorumlar",
   "reels.comment.none": "Henüz yorum yok",
   "reels.comment.hint": "Bir yorum yaz …",
@@ -2761,5 +2759,6 @@
   "reels.compose.local": "Şimdilik bu bilgisayarda kalır.",
   "reels.toast.posted": "Paylaşıldı! Seri: {0} gün",
   "reels.toast.posted.one": "Paylaşıldı! Seri: {0} gün",
-  "reels.toast.failed": "Fotoğraf kaydedilemedi."
+  "reels.toast.failed": "Fotoğraf kaydedilemedi.",
+  "reels.toast.readonly": "İkinci oyun penceresinde fotoğraf çekilemez."
 }

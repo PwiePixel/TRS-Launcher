@@ -2733,7 +2733,6 @@
   "reels.empty.hint": "Maak je eerste met de camera.",
   "reels.hint.keys": "Wiel: volgende foto · Enter: reageren · {0}: draaien · {1}: wegstoppen",
   "reels.nav.feed": "Feed",
-  "reels.nav.camera": "Camera",
   "reels.nav.rotate": "Draaien",
   "reels.ago.now": "zojuist",
   "reels.ago.min": "{0} min geleden",
@@ -2741,7 +2740,6 @@
   "reels.ago.days": "{0} d geleden",
   "reels.meta.phone": "met de telefoon in het spel",
   "reels.meta.selfie": "Selfie",
-  "reels.streak.days": "{0} dagen",
   "reels.comments": "Reacties",
   "reels.comment.none": "Nog geen reacties",
   "reels.comment.hint": "Schrijf een reactie …",
@@ -2761,5 +2759,6 @@
   "reels.compose.local": "Blijft voorlopig op deze pc.",
   "reels.toast.posted": "Gepost! Streak: {0} dagen",
   "reels.toast.posted.one": "Gepost! Streak: {0} dag",
-  "reels.toast.failed": "De foto kon niet worden opgeslagen."
+  "reels.toast.failed": "De foto kon niet worden opgeslagen.",
+  "reels.toast.readonly": "Foto's maken kan niet in een tweede spelvenster."
 }

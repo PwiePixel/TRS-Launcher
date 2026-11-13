@@ -2733,7 +2733,6 @@
   "reels.empty.hint": "Tire a primeira com a câmera.",
   "reels.hint.keys": "Roda: próxima foto · Enter: comentar · {0}: girar · {1}: guardar",
   "reels.nav.feed": "Feed",
-  "reels.nav.camera": "Câmera",
   "reels.nav.rotate": "Girar",
   "reels.ago.now": "agora mesmo",
   "reels.ago.min": "há {0} min",
@@ -2741,7 +2740,6 @@
   "reels.ago.days": "há {0} d",
   "reels.meta.phone": "com o celular no jogo",
   "reels.meta.selfie": "Selfie",
-  "reels.streak.days": "{0} dias",
   "reels.comments": "Comentários",
   "reels.comment.none": "Ainda não há comentários",
   "reels.comment.hint": "Escreva um comentário …",
@@ -2761,5 +2759,6 @@
   "reels.compose.local": "Por enquanto fica neste PC.",
   "reels.toast.posted": "Publicado! Sequência: {0} dias",
   "reels.toast.posted.one": "Publicado! Sequência: {0} dia",
-  "reels.toast.failed": "Não foi possível salvar a foto."
+  "reels.toast.failed": "Não foi possível salvar a foto.",
+  "reels.toast.readonly": "Não dá para tirar fotos em uma segunda janela do jogo."
 }

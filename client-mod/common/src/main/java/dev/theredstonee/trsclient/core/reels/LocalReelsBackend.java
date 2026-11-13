@@ -21,14 +21,17 @@ import java.util.Set;
 import java.util.TimeZone;
 
 /**
- * Der Feed auf diesem PC, ohne Netz: {@code <Ordner>/feed.json} (Posts mit Text, Likes, Kommentaren und die Tage mit
- * einem Post für die Streak) und {@code <Ordner>/photos/<id>.png}.
+ * Der Feed auf diesem PC, ohne Netz: {@code <Ordner>/feed.json} (Posts mit Text, Likes und Kommentaren) und
+ * {@code <Ordner>/photos/<id>.png}. Die Tage der Streak stehen nicht in der Datei: sie ergeben sich beim Laden aus den
+ * Posts, in der Zeitzone, die dann gilt – so zählt ein Post nach einem Wechsel der Zeitzone nie für zwei Tage.
  *
  * <p>Geschrieben wird atomar (wie die Notizen) und nur bei Änderungen. Eine {@code feed.json}, die sich nicht lesen
  * lässt, bleibt als {@code feed.json.broken} erhalten, bevor sie zum ersten Mal überschrieben wird. Im Zweitfenster
- * derselben Instanz ({@link ConfigStore#readOnly()}) wird {@code feed.json} nie geschrieben.
+ * derselben Instanz ({@link ConfigStore#readOnly()}) wird {@code feed.json} nie geschrieben ({@link #readOnly()}).
  *
- * <p>Alle Methoden sind synchronisiert: geändert wird im Spiel-Thread, gesichert im Hintergrund ({@link Reels#worker()}).
+ * <p>Geändert wird im Spiel-Thread, gesichert im Hintergrund ({@link Reels#worker()}). Die Sperre des Feeds gilt beim
+ * Sichern nur für die Kopie des Stands – geschrieben wird danach ohne sie, damit {@link #feed()} und die Änderungen im
+ * Spiel-Thread nie auf die Platte warten.
  */
 public final class LocalReelsBackend implements ReelsBackend {
 	static final String FEED = "feed.json";
@@ -43,17 +46,18 @@ public final class LocalReelsBackend implements ReelsBackend {
 	static final class FeedFile {
 		int version = 1;
 		List<ReelsPost> posts = new ArrayList<ReelsPost>();
-		/** Kalendertage (seit 1970, in der Zeitzone des Spielers) mit mindestens einem Post. */
-		List<Long> postDays = new ArrayList<Long>();
 	}
 
 	private final Path dir;
 	private final TimeZone zone;
 	/** Neueste zuerst. */
 	private final List<ReelsPost> posts = new ArrayList<ReelsPost>();
+	/** Kalendertage (seit 1970, in {@link #zone}) mit mindestens einem Post – aus den Posts gerechnet. */
 	private final List<Long> postDays = new ArrayList<Long>();
 	/** Die Liste, die {@link #feed()} herausgibt – nach jeder Änderung eine neue. */
-	private List<ReelsPost> view = Collections.emptyList();
+	private volatile List<ReelsPost> view = Collections.emptyList();
+	/** Nur ein Schreiber zugleich (zwei Sicherungen dürfen sich auf der Platte nicht überholen). */
+	private final Object writeLock = new Object();
 	private boolean dirty;
 	/** {@code feed.json} war da, ließ sich aber nicht lesen: vor dem ersten Schreiben sichern. */
 	private boolean brokenPending;
@@ -100,10 +104,8 @@ public final class LocalReelsBackend implements ReelsBackend {
 			if (ok != null && seen.add(ok.id)) posts.add(ok);
 		}
 		sortNewestFirst(posts);
-		if (f.postDays != null) {
-			for (Long d : f.postDays) if (d != null && !postDays.contains(d)) postDays.add(d);
-		}
-		// Jeder vorhandene Post zählt für seinen Tag (auch wenn die Liste der Tage fehlt oder gekürzt wurde).
+		// Jeder Post zählt für seinen Tag in der Zeitzone von jetzt. Eine früher gespeicherte Liste der Tage wird nicht
+		// gelesen: sie stammte womöglich aus einer anderen Zeitzone und gäbe demselben Post einen zweiten Tag.
 		for (ReelsPost p : posts) addDay(p.createdAt);
 		Collections.sort(postDays);
 		refresh();
@@ -163,8 +165,13 @@ public final class LocalReelsBackend implements ReelsBackend {
 	// --- ReelsBackend ---
 
 	@Override
-	public synchronized List<ReelsPost> feed() {
+	public List<ReelsPost> feed() {
 		return view;
+	}
+
+	@Override
+	public boolean readOnly() {
+		return dir != null && readOnly.getAsBoolean();
 	}
 
 	@Override
@@ -251,19 +258,36 @@ public final class LocalReelsBackend implements ReelsBackend {
 	}
 
 	@Override
-	public synchronized void flush() throws IOException {
-		if (!dirty || dir == null || readOnly.getAsBoolean()) return;
-		Path file = dir.resolve(FEED);
-		if (brokenPending) {
-			// Die unlesbare Datei aufheben, bevor sie überschrieben wird.
-			if (Files.isRegularFile(file)) Files.copy(file, dir.resolve(BROKEN), StandardCopyOption.REPLACE_EXISTING);
-			brokenPending = false;
+	public void flush() throws IOException {
+		if (dir == null || readOnly.getAsBoolean()) return;
+		synchronized (writeLock) {
+			FeedFile f = new FeedFile();
+			boolean keepBroken;
+			// Unter der Sperre des Feeds nur den Stand kopieren – das Schreiben wartet auf die Platte, der Feed nicht.
+			synchronized (this) {
+				if (!dirty) return;
+				for (ReelsPost p : posts) f.posts.add(p.copy());
+				keepBroken = brokenPending;
+				dirty = false;
+			}
+			Path file = dir.resolve(FEED);
+			try {
+				if (keepBroken) {
+					// Die unlesbare Datei aufheben, bevor sie überschrieben wird.
+					if (Files.isRegularFile(file)) Files.copy(file, dir.resolve(BROKEN), StandardCopyOption.REPLACE_EXISTING);
+					synchronized (this) {
+						brokenPending = false;
+					}
+				}
+				write(file, f);
+			} catch (IOException | RuntimeException e) {
+				// Nicht geschrieben: der Stand gilt weiter als ungesichert, der nächste Versuch schreibt ihn.
+				synchronized (this) {
+					dirty = true;
+				}
+				throw e;
+			}
 		}
-		FeedFile f = new FeedFile();
-		f.posts = new ArrayList<ReelsPost>(posts);
-		f.postDays = new ArrayList<Long>(postDays);
-		write(file, f);
-		dirty = false;
 	}
 
 	private static void write(Path file, Object data) throws IOException {

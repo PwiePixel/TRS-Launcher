@@ -226,6 +226,14 @@ public final class EmoteController {
 
 	// --- Kamera ---
 
+	/**
+	 * Hat die Emote-Kamera die Perspektive gerade umgestellt (und stellt sie nach dem Emote selbst zurück)? Wer die
+	 * Perspektive in dieser Zeit ebenfalls ändert, darf sich die jetzige nicht als „vom Spieler gewählt“ merken.
+	 */
+	public boolean cameraHeld() {
+		return cameraSet >= 0;
+	}
+
 	private void updateCamera(long now, Camera camera) {
 		boolean playing = selfPlaying(now);
 		TrsModules.EmoteCamera mode = modules.emoteCamera.get();

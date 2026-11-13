@@ -13,17 +13,23 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 /**
  * MC-Reels – der Dienst des laufenden Spiels: der Feed ({@link ReelsBackend}, vorerst nur lokal), Fotos speichern
  * (Ausschnitt, Verkleinern, PNG – im Hintergrund) und die Sperre der Handy-Taste. Die Oberfläche liegt in
- * {@code core.ui.reels}; der Baum ruft nur {@link #init} und beim Beenden {@link #save()}.
+ * {@code core.ui.reels}; der Baum ruft nur {@link #init} und beim Beenden {@link #stop()}.
  *
  * <p>Kein Netz: alles bleibt im Ordner, den {@link #init} bekommt. Nichts hier wirft Fehler zum Aufrufer – sie werden
  * gemeldet ({@code log}) und ein Foto, das nicht gespeichert werden konnte, kommt als {@link Shot#failed} zurück.
+ *
+ * <p><b>Kein Foto ohne Post:</b> jedes Foto bekommt beim Auslösen eine Nummer ({@link #savePhoto}), und es wartet immer
+ * nur einer auf höchstens ein Foto. Wartet beim Fertigwerden niemand mehr darauf ({@link #abandon}, ein neueres Foto,
+ * {@link #stop()}), löscht der Hintergrund-Thread die Datei gleich wieder, statt sie liegen zu lassen.
  */
 public final class Reels {
 	private static volatile Reels instance;
@@ -43,9 +49,12 @@ public final class Reels {
 		public final boolean portrait;
 		/** Das Foto konnte nicht gespeichert werden (dann sind Datei und Vorschau leer). */
 		public final boolean failed;
+		/** Nummer des Auslösens, zu dem dieses Foto gehört ({@link Reels#savePhoto}). */
+		public final long ticket;
 
-		Shot(String fileName, Path file, int width, int height, int[] preview, int previewW, int previewH, boolean selfie,
-				boolean portrait, boolean failed) {
+		Shot(long ticket, String fileName, Path file, int width, int height, int[] preview, int previewW, int previewH,
+				boolean selfie, boolean portrait, boolean failed) {
+			this.ticket = ticket;
 			this.fileName = fileName;
 			this.file = file;
 			this.width = width;
@@ -58,8 +67,8 @@ public final class Reels {
 			this.failed = failed;
 		}
 
-		static Shot failed(boolean selfie, boolean portrait) {
-			return new Shot(null, null, 0, 0, null, 0, 0, selfie, portrait, true);
+		static Shot failed(long ticket, boolean selfie, boolean portrait) {
+			return new Shot(ticket, null, null, 0, 0, null, 0, 0, selfie, portrait, true);
 		}
 	}
 
@@ -72,6 +81,9 @@ public final class Reels {
 	private Executor worker;
 	private int shotSalt = (int) (System.nanoTime() >>> 8);
 	private volatile long lastSaveError;
+	/** Nummer des Fotos, auf das gerade jemand wartet (0 = niemand). */
+	private volatile long wanted;
+	private long lastTicket;
 
 	Reels(TrsModules modules, ReelsBackend backend, Consumer<String> log, Executor worker, TimeZone zone) {
 		this.modules = modules;
@@ -148,20 +160,25 @@ public final class Reels {
 	 * 16:9 bzw. 9:16 zuschneiden, auf höchstens {@link PhotoFrame#MAX_LONG_SIDE} verkleinern (nie vergrößern) und als
 	 * PNG speichern. Das Ergebnis kommt über {@link #pollShot()} (Render-Thread) und, wenn angegeben, über {@code done}
 	 * (im Hintergrund-Thread).
+	 *
+	 * @return die Nummer dieses Fotos ({@link Shot#ticket}). Ab jetzt wartet der Aufrufer auf genau dieses Foto; ein
+	 *         älteres, das noch gespeichert wird, verfällt damit (seine Datei wird wieder gelöscht).
 	 */
-	public void savePhoto(final int[] argb, final int w, final int h, final PhoneHold hold, final boolean selfie,
+	public long savePhoto(final int[] argb, final int w, final int h, final PhoneHold hold, final boolean selfie,
 			final Consumer<Shot> done) {
 		final boolean portrait = hold == PhoneHold.PORTRAIT;
 		final long now = System.currentTimeMillis();
+		final long ticket = nextTicket();
+		wanted = ticket;
 		Runnable job = new Runnable() {
 			@Override
 			public void run() {
 				Shot shot;
 				try {
-					shot = write(argb, w, h, hold, selfie, now);
+					shot = write(ticket, argb, w, h, hold, selfie, now);
 				} catch (IOException | RuntimeException | OutOfMemoryError e) {
 					log.accept("MC-Reels: Foto nicht gespeichert: " + e);
-					shot = Shot.failed(selfie, portrait);
+					shot = Shot.failed(ticket, selfie, portrait);
 				}
 				deliver(shot, done);
 			}
@@ -169,12 +186,30 @@ public final class Reels {
 		try {
 			worker().execute(job);
 		} catch (RejectedExecutionException e) {
-			deliver(Shot.failed(selfie, portrait), done);
+			deliver(Shot.failed(ticket, selfie, portrait), done);
 		}
+		return ticket;
+	}
+
+	private synchronized long nextTicket() {
+		return ++lastTicket;
+	}
+
+	/**
+	 * Auf das Foto mit dieser Nummer wartet niemand mehr (Kamera verlassen, Handy weggesteckt): wird es noch fertig,
+	 * löscht der Hintergrund-Thread die Datei wieder. Ein anderes, neueres Foto bleibt davon unberührt.
+	 */
+	public void abandon(long ticket) {
+		if (wanted == ticket) wanted = 0L;
 	}
 
 	private void deliver(Shot shot, Consumer<Shot> done) {
-		shots.add(shot);
+		if (shot.ticket == wanted) {
+			shots.add(shot);
+		} else {
+			// Niemand wartet mehr darauf: nicht liegen lassen (läuft schon im Hintergrund-Thread).
+			delete(shot);
+		}
 		if (done == null) return;
 		try {
 			done.accept(shot);
@@ -183,7 +218,7 @@ public final class Reels {
 		}
 	}
 
-	private Shot write(int[] argb, int w, int h, PhoneHold hold, boolean selfie, long now) throws IOException {
+	private Shot write(long ticket, int[] argb, int w, int h, PhoneHold hold, boolean selfie, long now) throws IOException {
 		boolean portrait = hold == PhoneHold.PORTRAIT;
 		int[] aspect = PhotoFrame.aspect(hold);
 		int[] crop = PhotoFrame.cropRect(w, h, aspect[0], aspect[1]);
@@ -222,7 +257,7 @@ public final class Reels {
 
 		int[] small = PhotoFrame.outSize(size[0], size[1], PhotoFrame.MAX_PREVIEW_SIDE);
 		int[] preview = PhotoFrame.render(pixels, size[0], size[1], new int[]{0, 0, size[0], size[1]}, small[0], small[1]);
-		return new Shot(id + ".png", file, size[0], size[1], preview, small[0], small[1], selfie, portrait, false);
+		return new Shot(ticket, id + ".png", file, size[0], size[1], preview, small[0], small[1], selfie, portrait, false);
 	}
 
 	private synchronized int nextSalt() {
@@ -240,23 +275,29 @@ public final class Reels {
 	 */
 	public void discard(final Shot shot) {
 		if (shot == null || shot.failed || shot.file == null) return;
-		for (ReelsPost p : backend.feed()) {
-			if (shot.fileName != null && shot.fileName.equals(p.photo)) return;
-		}
 		Runnable job = new Runnable() {
 			@Override
 			public void run() {
-				try {
-					Files.deleteIfExists(shot.file);
-				} catch (IOException | RuntimeException e) {
-					log.accept("MC-Reels: Foto nicht gelöscht: " + e);
-				}
+				delete(shot);
 			}
 		};
 		try {
 			worker().execute(job);
 		} catch (RejectedExecutionException e) {
 			job.run();
+		}
+	}
+
+	/** Datei eines nicht geposteten Fotos löschen (wartet auf die Platte). Fotos, die zu einem Post gehören, bleiben. */
+	private void delete(Shot shot) {
+		if (shot == null || shot.failed || shot.file == null) return;
+		for (ReelsPost p : backend.feed()) {
+			if (shot.fileName != null && shot.fileName.equals(p.photo)) return;
+		}
+		try {
+			Files.deleteIfExists(shot.file);
+		} catch (IOException | RuntimeException e) {
+			log.accept("MC-Reels: Foto nicht gelöscht: " + e);
 		}
 	}
 
@@ -298,6 +339,40 @@ public final class Reels {
 				log.accept("MC-Reels: Feed nicht gespeichert: " + e);
 			}
 		}
+	}
+
+	/**
+	 * Das Spiel wird beendet: auf kein Foto wartet mehr jemand. Kurz abwarten, was der Hintergrund-Thread gerade noch
+	 * schreibt oder löscht (höchstens {@code waitMs}), liegengebliebene Fotos ohne Post löschen und den Feed sichern.
+	 */
+	public void stop(long waitMs) {
+		wanted = 0L;
+		Executor w;
+		synchronized (this) {
+			w = worker;
+		}
+		if (w instanceof ExecutorService && waitMs > 0) {
+			try {
+				Future<?> idle = ((ExecutorService) w).submit(new Runnable() {
+					@Override
+					public void run() {
+					}
+				});
+				idle.get(waitMs, TimeUnit.MILLISECONDS);
+			} catch (InterruptedException e) {
+				Thread.currentThread().interrupt();
+			} catch (Exception e) {
+				// Zu langsam oder schon beendet: der Feed wird trotzdem gesichert.
+			}
+		}
+		Shot left;
+		while ((left = shots.poll()) != null) delete(left);
+		save();
+	}
+
+	/** Wie {@link #stop(long)} mit zwei Sekunden Geduld. */
+	public void stop() {
+		stop(2000L);
 	}
 
 	/** Im Hintergrund sichern – nach jedem Post, Like und Kommentar, damit ein Absturz nichts kostet. */

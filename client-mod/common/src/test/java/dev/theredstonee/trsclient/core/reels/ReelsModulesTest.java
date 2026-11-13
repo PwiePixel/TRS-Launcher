@@ -43,7 +43,7 @@ class ReelsModulesTest {
 		assertFalse(m.reels.reels.isEnabled(), "MC-Reels ist ab Werk aus");
 		assertSame(m.reels.reels, m.registry.byId("mcReels"));
 		assertEquals(Category.MISC, m.reels.reels.category());
-		assertEquals("key.keyboard.h", m.reels.openKey.get());
+		assertEquals("key.keyboard.k", m.reels.openKey.get());
 		assertEquals("key.keyboard.r", m.reels.rotateKey.get());
 		assertFalse(m.reels.openKey.isLinked(), "eigene Modul-Taste, keine Vanilla-Belegung");
 		assertSame(PhoneHold.LANDSCAPE, m.reels.hold.get());

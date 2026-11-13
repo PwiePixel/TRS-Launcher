@@ -333,15 +333,22 @@ final class FeedView {
 		int capGap = p(land ? 6 : 8);
 		int capH = cap.isEmpty() ? 0 : capGap + (cap.size() - 1) * capLine + PhoneText.height(mCap);
 		String meta = null;
+		List<String> meta2 = java.util.Collections.<String>emptyList();
 		if (!land) {
 			String[] ago = ReelsTime.ago(post.createdAt, ui.now());
 			String when = I18n.tr(ago[0], ago[1]);
-			meta = when + " · " + (post.selfie ? I18n.tr("reels.meta.selfie") : I18n.tr("reels.meta.phone"));
-			// Lieber lesbar als vollständig: passt die ganze Zeile nicht in ihrer Größe, bleibt nur die Zeit.
-			if (PhoneText.width(c, meta, mMeta) > w) meta = when;
+			String how = post.selfie ? I18n.tr("reels.meta.selfie") : I18n.tr("reels.meta.phone");
+			meta = when + " · " + how;
+			// Lieber lesbar als klein: passt die ganze Zeile nicht in ihrer Größe, steht der zweite Teil darunter
+			// (in derselben Größe, notfalls auf zwei Zeilen).
+			if (PhoneText.width(c, meta, mMeta) > w) {
+				meta = when;
+				meta2 = PhoneText.wrap(c, how, mMeta, w, 2);
+			}
 		}
 		int metaGap = p(6);
-		int metaH = meta == null ? 0 : metaGap + PhoneText.height(mMeta);
+		int metaLine = (PhoneText.GLYPH_H + 2) * mMeta;
+		int metaH = meta == null ? 0 : metaGap + PhoneText.height(mMeta) + meta2.size() * metaLine;
 
 		int y = bottom - (rowH + capH + metaH);
 		// Kopf und Name
@@ -372,6 +379,9 @@ final class FeedView {
 		}
 		if (meta != null) {
 			PhoneText.line(c, meta, left, y + metaGap, mMeta, w, TEXT_SOFT, true);
+			for (int i = 0; i < meta2.size(); i++) {
+				PhoneText.draw(c, meta2.get(i), left, y + metaGap + (i + 1) * metaLine, mMeta, TEXT_SOFT, true);
+			}
 		}
 	}
 

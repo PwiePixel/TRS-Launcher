@@ -2733,7 +2733,6 @@
   "reels.empty.hint": "Prends la première avec l'appareil photo.",
   "reels.hint.keys": "Molette : photo suivante · Entrée : commenter · {0} : tourner · {1} : ranger",
   "reels.nav.feed": "Fil",
-  "reels.nav.camera": "Caméra",
   "reels.nav.rotate": "Tourner",
   "reels.ago.now": "à l'instant",
   "reels.ago.min": "il y a {0} min",
@@ -2741,7 +2740,6 @@
   "reels.ago.days": "il y a {0} j",
   "reels.meta.phone": "avec le téléphone dans le jeu",
   "reels.meta.selfie": "Selfie",
-  "reels.streak.days": "{0} jours",
   "reels.comments": "Commentaires",
   "reels.comment.none": "Pas encore de commentaires",
   "reels.comment.hint": "Écris un commentaire …",
@@ -2761,5 +2759,6 @@
   "reels.compose.local": "Reste sur ce PC pour l'instant.",
   "reels.toast.posted": "Publié ! Série : {0} jours",
   "reels.toast.posted.one": "Publié ! Série : {0} jour",
-  "reels.toast.failed": "La photo n'a pas pu être enregistrée."
+  "reels.toast.failed": "La photo n'a pas pu être enregistrée.",
+  "reels.toast.readonly": "Pas de photos dans une deuxième fenêtre du jeu."
 }

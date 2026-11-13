@@ -257,7 +257,7 @@ class PhoneRenderTool {
 			@Override public boolean slimSkin() { return slim; }
 			@Override public boolean sleeve(boolean left) { return true; }
 			@Override public String playerName() { return "PixelDEV_CAM"; }
-			@Override public String keyName(int rawKey) { return rawKey == 'H' ? "key.keyboard.h" : rawKey == 'R' ? "key.keyboard.r" : null; }
+			@Override public String keyName(int rawKey) { return rawKey == 'K' ? "key.keyboard.k" : rawKey == 'R' ? "key.keyboard.r" : null; }
 			@Override public boolean keyDown(String keyName) { return false; }
 			@Override public String keyLabel(String keyName) { return keyName.substring(keyName.lastIndexOf('.') + 1).toUpperCase(); }
 			@Override public String paste() { return null; }

@@ -47,7 +47,9 @@ import java.util.concurrent.RejectedExecutionException;
  * ein Bild für den Sucher; es wird im Hintergrund ({@link Reels#worker()}) auf die Größe des Suchers gebracht (nie
  * vergrößert) und hier nur noch hochgeladen. Der Auslöser fordert ein Bild in voller Auflösung an, das
  * {@link Reels#savePhoto} zuschneidet und als PNG speichert; danach öffnet sich „Neuer Post“. „Nochmal“ und Esc
- * löschen das Foto wieder, „Posten“ stellt es vorn in den Feed.
+ * löschen das Foto wieder, „Posten“ stellt es vorn in den Feed. Der Druck, der ausgelöst hat, postet nie gleich mit:
+ * „Posten“ und Enter gelten erst kurz nach dem Öffnen von „Neuer Post“, Enter außerdem erst nach dem Loslassen
+ * ({@link #POST_GUARD_MS}).
  *
  * <p><b>Aufräumen:</b> {@link #dispose()} gibt die Texturen frei, löscht ein nicht gepostetes Foto, sperrt die
  * Handy-Taste bis zum Loslassen und sichert den Feed. Es läuft nach der Schließ-Animation und muss vom Baum zusätzlich
@@ -151,8 +153,20 @@ public final class PhoneUi extends UiScreen {
 	/** Fotos im Feed: höchstens so groß geladen (längste Seite), so viele zugleich. */
 	static final int PHOTO_MAX = 1024;
 	static final int PHOTO_CACHE = 6;
-	/** Sucher: so oft kommt ein neues Bild (Millisekunden) – etwa sechsmal je Sekunde. */
+	/**
+	 * Sucher: so oft kommt ein neues Bild (Millisekunden) – etwa sechsmal je Sekunde bis Full HD. Jedes Bild kostet den
+	 * Render-Thread Zeit im Verhältnis zur Pixelzahl des Fensters, deshalb wird der Abstand darüber länger
+	 * ({@link #finderInterval}), höchstens {@link #FINDER_INTERVAL_MAX_MS}.
+	 */
 	static final long FINDER_INTERVAL_MS = 160L;
+	static final long FINDER_INTERVAL_MAX_MS = 320L;
+	/** Bis zu dieser Pixelzahl des Fensters (1920×1080) gilt {@link #FINDER_INTERVAL_MS}. */
+	static final long FINDER_FULL_RATE_PIXELS = 1920L * 1080L;
+	/**
+	 * „Neuer Post“: so lange nach dem Öffnen gelten „Posten“ und Enter noch nicht – ein zweiter Druck auf den Auslöser
+	 * (Doppelklick, ungeduldiges zweites Enter, Tastenwiederholung) postet das Foto sonst ohne Text.
+	 */
+	static final long POST_GUARD_MS = 400L;
 	/** Kommt so lange kein angefordertes Bild, gilt die Anforderung als verloren. */
 	static final long FRAME_TIMEOUT_MS = 2000L;
 	/** So lange darf das Speichern eines Fotos dauern, bevor die Kamera wieder frei ist. */
@@ -202,10 +216,15 @@ public final class PhoneUi extends UiScreen {
 	/** Das Foto wird gerade im Hintergrund gespeichert. */
 	private boolean saving;
 	private long savingSince;
+	/** Nummer des Fotos, das gerade gespeichert wird ({@link Reels#savePhoto}) – nur dieses öffnet „Neuer Post“. */
+	private long saveTicket;
 	private long flashAt = Long.MIN_VALUE / 2;
 	/** Das aufgenommene, noch nicht gepostete Foto („Neuer Post“). */
 	private Reels.Shot shot;
 	private TextureRef previewTexture;
+	/** Wann „Neuer Post“ aufging, und ob Enter seitdem einmal losgelassen war. */
+	private long composeSince;
+	private boolean composeEnterUp;
 	/** Beim Ziehen im Sucher: letzte Mausposition (Fensterpixel). */
 	private double lookX, lookY;
 	private boolean lookStart;
@@ -269,6 +288,7 @@ public final class PhoneUi extends UiScreen {
 		refreshFeed();
 		if (photos != null) photos.frame();
 		cameraTick(l, raw.images());
+		trackEnter();
 
 		// Ab hier ist eine Einheit ein Fensterpixel – die GUI-Skalierung spielt keine Rolle mehr.
 		raw.push();
@@ -304,6 +324,12 @@ public final class PhoneUi extends UiScreen {
 		if (openKeySeenUp) return;
 		KeySetting key = modules.reels.openKey;
 		if (!key.isBound() || !host.keyDown(KeyCombo.main(key.get()))) openKeySeenUp = true;
+	}
+
+	/** „Neuer Post“: Enter zählt erst, wenn die Taste seit dem Öffnen einmal losgelassen war. */
+	private void trackEnter() {
+		if (view != View.COMPOSE || composeEnterUp) return;
+		if (!host.keyDown("key.keyboard.enter") && !host.keyDown("key.keyboard.keypad.enter")) composeEnterUp = true;
 	}
 
 	private void refreshFeed() {
@@ -486,8 +512,14 @@ public final class PhoneUi extends UiScreen {
 		if (view != View.CAMERA) return;
 		view = View.FEED;
 		shutterPending = false;
-		saving = false;
+		abandonSave();
 		releaseFinder();
+	}
+
+	/** Auf das Foto, das gerade gespeichert wird, wartet niemand mehr: es wird gleich wieder gelöscht. */
+	private void abandonSave() {
+		if (saving) reels.abandon(saveTicket);
+		saving = false;
 	}
 
 	boolean selfie() {
@@ -507,8 +539,9 @@ public final class PhoneUi extends UiScreen {
 	}
 
 	/**
-	 * Zeigt die Kamera gerade auf den Spieler („Selfie“)? Der Baum dreht dann die Kamera des Spiels – für die Welt hinter
-	 * dem Handy, den Sucher und das Foto.
+	 * Zeigt die Kamera gerade auf den Spieler („Selfie“)? Der Baum dreht dann die Kamera des Spiels für den Sucher und
+	 * das Foto. Hinter dem Handy muss er dabei die normale Sicht stehen lassen (das letzte Bild vor dem Umschalten):
+	 * sonst stünde die eigene Figur zwischen den gezeichneten Armen.
 	 */
 	public boolean selfieActive() {
 		return !disposed && view == View.CAMERA && selfie;
@@ -522,6 +555,11 @@ public final class PhoneUi extends UiScreen {
 	/** Auslöser: das nächste Bild der Welt wird zum Foto. */
 	void shutter() {
 		if (view != View.CAMERA || busy() || isClosing()) return;
+		if (reels.backend().readOnly()) {
+			// Zweitfenster: der Post ließe sich nicht sichern – dann auch kein Foto, das ohne Post liegen bliebe.
+			toast(I18n.tr("reels.toast.readonly"));
+			return;
+		}
 		long t = ticker();
 		shutterPending = true;
 		shutterAt = t;
@@ -575,7 +613,8 @@ public final class PhoneUi extends UiScreen {
 		long t = ticker();
 		Reels.Shot done;
 		while ((done = reels.pollShot()) != null) {
-			if (saving && view == View.CAMERA && shot == null) {
+			// Nur das Foto dieses Auslösens zählt – ein älteres, dessen Speichern verlassen wurde, wird gelöscht.
+			if (saving && done.ticket == saveTicket && view == View.CAMERA && shot == null) {
 				saving = false;
 				if (done.failed) toast(I18n.tr("reels.toast.failed"));
 				else compose(done);
@@ -591,7 +630,7 @@ public final class PhoneUi extends UiScreen {
 				if (view != View.CAMERA || f.argb == null || f.width <= 0 || f.height <= 0) continue;
 				saving = true;
 				savingSince = t;
-				reels.savePhoto(f.argb, f.width, f.height, shutterHold, shutterSelfie, null);
+				saveTicket = reels.savePhoto(f.argb, f.width, f.height, shutterHold, shutterSelfie, null);
 			} else if (view == View.CAMERA && finderState == FINDER_REQUESTED) {
 				scaleFinder(f, l.screenW, l.screenH);
 			}
@@ -602,7 +641,7 @@ public final class PhoneUi extends UiScreen {
 			toast(I18n.tr("reels.toast.failed"));
 		}
 		if (saving && t - savingSince > SAVE_TIMEOUT_MS) {
-			saving = false;
+			abandonSave();
 			toast(I18n.tr("reels.toast.failed"));
 		}
 		if (view != View.CAMERA) return;
@@ -621,12 +660,23 @@ public final class PhoneUi extends UiScreen {
 			}
 		}
 		if (finderState != FINDER_IDLE && t - finderSince > FRAME_TIMEOUT_MS) finderState = FINDER_IDLE;
-		if (finderState == FINDER_IDLE && images && t - finderLast >= FINDER_INTERVAL_MS) {
+		if (finderState == FINDER_IDLE && images && t - finderLast >= finderInterval(l.windowW, l.windowH)) {
 			finderLast = t;
 			finderSince = t;
 			finderState = FINDER_REQUESTED;
 			host.requestFrame(false, l.screenW, l.screenH);
 		}
+	}
+
+	/**
+	 * Abstand der Sucherbilder für ein Fenster dieser Größe: {@link #FINDER_INTERVAL_MS} bis Full HD, darüber im
+	 * Verhältnis der Pixelzahl länger (jedes Bild wird in voller Fenstergröße ausgelesen), höchstens
+	 * {@link #FINDER_INTERVAL_MAX_MS}.
+	 */
+	static long finderInterval(int windowW, int windowH) {
+		long pixels = (long) Math.max(0, windowW) * Math.max(0, windowH);
+		if (pixels <= FINDER_FULL_RATE_PIXELS) return FINDER_INTERVAL_MS;
+		return Math.min(FINDER_INTERVAL_MAX_MS, FINDER_INTERVAL_MS * pixels / FINDER_FULL_RATE_PIXELS);
 	}
 
 	/**
@@ -671,6 +721,8 @@ public final class PhoneUi extends UiScreen {
 	private void compose(Reels.Shot done) {
 		shot = done;
 		view = View.COMPOSE;
+		composeSince = ticker();
+		composeEnterUp = false;
 		captionInput.clear();
 		captionInput.setFocused(true);
 		releaseFinder();
@@ -719,9 +771,14 @@ public final class PhoneUi extends UiScreen {
 		host.click();
 	}
 
+	/** Gilt „Posten“ schon? Kurz nach dem Öffnen von „Neuer Post“ noch nicht ({@link #POST_GUARD_MS}). */
+	boolean postArmed() {
+		return view == View.COMPOSE && ticker() - composeSince >= POST_GUARD_MS;
+	}
+
 	/** „Posten“: das Foto steht danach vorn im Feed. */
 	void postShot() {
-		if (view != View.COMPOSE || shot == null) return;
+		if (view != View.COMPOSE || shot == null || !postArmed()) return;
 		ReelsPost posted = reels.post(shot, captionInput.text(), host.playerName(), now());
 		if (posted == null) {
 			toast(I18n.tr("reels.toast.failed"));
@@ -833,20 +890,21 @@ public final class PhoneUi extends UiScreen {
 			} else if (key == UiKey.PASTE) {
 				paste(commentInput);
 			} else {
-				commentInput.key(key);
+				edit(commentInput, key);
 			}
 			return true;
 		}
 		if (view == View.COMPOSE) {
 			// Auch hier ein Textfeld: Enter postet, Esc und Tab verwerfen das Foto („Nochmal“).
 			if (key == UiKey.ENTER) {
-				postShot();
+				// Das Enter, das ausgelöst hat (noch unten oder wiederholt), postet nicht.
+				if (composeEnterUp) postShot();
 			} else if (key == UiKey.ESCAPE || key == UiKey.TAB) {
 				retry();
 			} else if (key == UiKey.PASTE) {
 				paste(captionInput);
 			} else {
-				captionInput.key(key);
+				edit(captionInput, key);
 			}
 			return true;
 		}
@@ -921,6 +979,15 @@ public final class PhoneUi extends UiScreen {
 		return pressed != null && key.isBound() && pressed.equals(KeyCombo.main(key.get()));
 	}
 
+	/**
+	 * Taste im Textfeld. Der Cursor bleibt immer am Ende: die Felder des Handys zeigen ihn dort und haben keinen Platz
+	 * zum Blättern im Text – Pfeile, Pos1 und Ende würden ihn sonst unsichtbar verschieben.
+	 */
+	private static void edit(TextInput input, UiKey key) {
+		if (key == UiKey.LEFT || key == UiKey.RIGHT || key == UiKey.HOME || key == UiKey.END) return;
+		input.key(key);
+	}
+
 	private void paste(TextInput input) {
 		String text = host.paste();
 		if (text == null) return;
@@ -957,8 +1024,9 @@ public final class PhoneUi extends UiScreen {
 	}
 
 	/**
-	 * Aufräumen, wenn das Handy weg ist: Texturen freigeben, die Handy-Taste bis zum Loslassen sperren, den Feed
-	 * sichern. Mehrfach rufen schadet nicht. Render-Thread.
+	 * Aufräumen, wenn das Handy weg ist: Texturen freigeben, ein nicht gepostetes Foto löschen (auch eines, das noch
+	 * gespeichert wird), die Handy-Taste bis zum Loslassen sperren, den Feed sichern. Mehrfach rufen schadet nicht.
+	 * Render-Thread.
 	 */
 	public void dispose() {
 		if (disposed) return;
@@ -970,7 +1038,11 @@ public final class PhoneUi extends UiScreen {
 		shot = null;
 		if (open != null) reels.discard(open);
 		shutterPending = false;
-		saving = false;
+		// Ein Foto, das noch gespeichert wird, löscht der Hintergrund-Thread, sobald es fertig ist – und eines, das
+		// gerade fertig wurde, aber noch nicht abgeholt ist, gleich hier.
+		abandonSave();
+		Reels.Shot late;
+		while ((late = reels.pollShot()) != null) reels.discard(late);
 		toast = null;
 		releaseFinder();
 		releasePreview();
@@ -1055,6 +1127,11 @@ public final class PhoneUi extends UiScreen {
 	/** Die Meldung, die gerade auf dem Handy steht, oder null. */
 	public String testToast() {
 		return toast != null && ticker() < toastUntil ? toast : null;
+	}
+
+	/** Gelten „Posten“ und Enter in „Neuer Post“ schon (kurz nach dem Öffnen noch nicht)? */
+	public boolean testPostArmed() {
+		return postArmed() && composeEnterUp;
 	}
 
 	/** Text im Feld von „Neuer Post“. */

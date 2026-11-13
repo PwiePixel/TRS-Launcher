@@ -2733,7 +2733,6 @@
   "reels.empty.hint": "Zrób pierwsze aparatem.",
   "reels.hint.keys": "Kółko: następne zdjęcie · Enter: komentarz · {0}: obróć · {1}: schowaj",
   "reels.nav.feed": "Feed",
-  "reels.nav.camera": "Aparat",
   "reels.nav.rotate": "Obróć",
   "reels.ago.now": "przed chwilą",
   "reels.ago.min": "{0} min temu",
@@ -2741,7 +2740,6 @@
   "reels.ago.days": "{0} dni temu",
   "reels.meta.phone": "telefonem w grze",
   "reels.meta.selfie": "Selfie",
-  "reels.streak.days": "{0} dni",
   "reels.comments": "Komentarze",
   "reels.comment.none": "Brak komentarzy",
   "reels.comment.hint": "Napisz komentarz …",
@@ -2761,5 +2759,6 @@
   "reels.compose.local": "Na razie zostaje na tym komputerze.",
   "reels.toast.posted": "Opublikowano! Seria: {0} dni",
   "reels.toast.posted.one": "Opublikowano! Seria: {0} dzień",
-  "reels.toast.failed": "Nie udało się zapisać zdjęcia."
+  "reels.toast.failed": "Nie udało się zapisać zdjęcia.",
+  "reels.toast.readonly": "W drugim oknie gry nie można robić zdjęć."
 }
