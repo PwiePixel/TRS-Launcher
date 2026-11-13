@@ -88,13 +88,21 @@ public final class ReelsPost {
 
 	/**
 	 * Text für Feed und Kommentare: Steuerzeichen und Zeilenumbrüche werden zu Leerzeichen, Ränder weg, höchstens
-	 * {@code max} Zeichen (ohne ein Zeichenpaar zu zerschneiden).
+	 * {@code max} Zeichen (ohne ein Zeichenpaar zu zerschneiden). Ein halbes Zeichenpaar (ein Emoji aus der
+	 * Zwischenablage, von dem eine Hälfte gelöscht oder abgeschnitten wurde) fällt weg: es ist kein Zeichen und ließe
+	 * sich nicht als UTF-8 schreiben.
 	 */
 	public static String clean(String text, int max) {
 		if (text == null) return "";
 		StringBuilder b = new StringBuilder(Math.min(text.length(), max + 8));
 		for (int i = 0; i < text.length(); i++) {
 			char c = text.charAt(i);
+			if (Character.isHighSurrogate(c)) {
+				// Nur als ganzes Paar.
+				if (i + 1 < text.length() && Character.isLowSurrogate(text.charAt(i + 1))) b.append(c).append(text.charAt(++i));
+				continue;
+			}
+			if (Character.isLowSurrogate(c)) continue;
 			b.append(c < ' ' || c == 0x7F || c == '§' ? ' ' : c);
 		}
 		String s = b.toString().trim();

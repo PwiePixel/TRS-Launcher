@@ -4,7 +4,9 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import dev.theredstonee.trsclient.core.config.ConfigStore;
 
+import java.io.BufferedWriter;
 import java.io.IOException;
+import java.io.OutputStreamWriter;
 import java.io.Reader;
 import java.io.Writer;
 import java.nio.charset.StandardCharsets;
@@ -294,7 +296,10 @@ public final class LocalReelsBackend implements ReelsBackend {
 		Path parent = file.toAbsolutePath().getParent();
 		if (parent != null) Files.createDirectories(parent);
 		Path tmp = file.resolveSibling(file.getFileName() + ".tmp");
-		try (Writer w = Files.newBufferedWriter(tmp, StandardCharsets.UTF_8)) {
+		// Nicht Files.newBufferedWriter: dessen Kodierer bricht bei einem Text ab, der sich nicht als UTF-8 schreiben
+		// lässt (ein halbes Zeichenpaar) – ein einziger solcher Text hielte dann jede weitere Sicherung auf. Dieser
+		// hier ersetzt die Stelle durch „?“ und schreibt den Rest.
+		try (Writer w = new BufferedWriter(new OutputStreamWriter(Files.newOutputStream(tmp), StandardCharsets.UTF_8))) {
 			GSON.toJson(data, w);
 		}
 		try {

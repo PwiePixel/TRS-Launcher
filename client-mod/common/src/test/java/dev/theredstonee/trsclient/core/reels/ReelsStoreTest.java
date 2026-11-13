@@ -216,6 +216,65 @@ class ReelsStoreTest {
 	}
 
 	@Test
+	void halfACharacterPairIsDroppedAndNeverBlocksSaving() throws IOException {
+		// Ein Emoji sind zwei Zeichen (ein Paar). Bleibt nur eine Hälfte (Rücktaste, Längengrenze), ist das kein Zeichen.
+		String pair = new String(Character.toChars(0x1F642));
+		char high = pair.charAt(0), low = pair.charAt(1);
+		assertEquals("nice", ReelsPost.clean("nice " + high, 80));
+		assertEquals("ab", ReelsPost.clean("a" + low + "b", 80));
+		assertEquals("a" + pair + "b", ReelsPost.clean("a" + pair + "b", 80), "ein ganzes Paar bleibt");
+		assertEquals(pair, ReelsPost.clean("" + high + pair + low, 80));
+		assertEquals("", ReelsPost.clean("" + low + high, 80));
+
+		LocalReelsBackend a = new LocalReelsBackend(tmp, UTC);
+		ReelsPost p = a.post(photo(1), 1280, 720, false, false, "nice " + high, "A" + high, NOON);
+		assertEquals("nice", p.caption);
+		assertEquals("A", p.author);
+		ReelsComment c = a.comment(p.id, "B" + low, low + "ok " + pair, NOON + 1000);
+		assertNotNull(c);
+		assertEquals("ok " + pair, c.text);
+		assertEquals("B", c.author);
+		a.flush();
+		assertFalse(a.dirty());
+		assertFalse(Files.exists(tmp.resolve("feed.json.tmp")));
+		ReelsPost read = new LocalReelsBackend(tmp, UTC).feed().get(0);
+		assertEquals("nice", read.caption);
+		assertEquals("ok " + pair, read.comments.get(0).text, "ein ganzes Paar übersteht Sichern und Laden");
+
+		// Sollte doch einmal ein halbes Paar im Feed stehen: gesichert wird trotzdem – der Rest des Feeds hängt nicht daran.
+		a.feed().get(0).caption = "kaputt" + high;
+		a.toggleLike(p.id);
+		a.post(photo(2), 1280, 720, false, false, "danach", "A", NOON + 2000);
+		a.flush();
+		assertFalse(a.dirty(), "ein Text, der sich nicht schreiben lässt, hält das Sichern nicht auf");
+		assertFalse(Files.exists(tmp.resolve("feed.json.tmp")));
+		LocalReelsBackend b = new LocalReelsBackend(tmp, UTC);
+		assertEquals(2, b.feed().size());
+		assertEquals("danach", b.feed().get(0).caption);
+		assertTrue(b.feed().get(1).caption.startsWith("kaputt"), b.feed().get(1).caption);
+		assertTrue(b.feed().get(1).likedByMe);
+	}
+
+	@Test
+	void halfACharacterPairInAHandEditedFeedIsDroppedOnLoad() throws IOException {
+		String id = ReelsPost.newId(NOON, UTC, 7);
+		String json = "{\"version\":1,\"posts\":[{\"id\":\"" + id + "\",\"author\":\"A\\ud83d\",\"caption\":\"x\\ud83dy\",\"photo\":\"" + id
+				+ ".png\",\"width\":1280,\"height\":720,\"createdAt\":" + NOON + ",\"comments\":[{\"author\":\"B\",\"text\":\"\\ude42hm\",\"at\":"
+				+ NOON + "}]}]}";
+		Files.write(tmp.resolve("feed.json"), json.getBytes(StandardCharsets.UTF_8));
+		LocalReelsBackend a = new LocalReelsBackend(tmp, UTC);
+		assertEquals(1, a.feed().size());
+		ReelsPost p = a.feed().get(0);
+		assertEquals("A", p.author);
+		assertEquals("xy", p.caption);
+		assertEquals("hm", p.comments.get(0).text);
+		a.toggleLike(p.id);
+		a.flush();
+		assertFalse(a.dirty());
+		assertTrue(new LocalReelsBackend(tmp, UTC).feed().get(0).likedByMe);
+	}
+
+	@Test
 	void readOnlySecondWindowWritesNothing() throws IOException {
 		LocalReelsBackend a = new LocalReelsBackend(tmp, UTC);
 		a.readOnly = new java.util.function.BooleanSupplier() {
