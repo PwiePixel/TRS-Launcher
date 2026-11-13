@@ -591,13 +591,28 @@ public final class ReelsTest {
 				AutoTest.shot(mc, "trsclient-reels-16b-quer-kamera-selfie");
 				next(15);
 				return;
-			case 55:
+			case 55: {
 				// Tab wechselt zurück zu „Foto“ (echte Taste).
 				AutoTest.key(mc, Keys.code("key.keyboard.tab"));
 				check("Tab schaltet auf „Foto“", !ui.testSelfie() && !ui.selfieActive());
+				// Umsehen: Ziehen im Sucher (200 Fensterpixel nach rechts = 18°) und die Pfeiltaste (5° je Druck).
+				int[] finder = spot("viewfinder");
+				double gs = Mc.window().getGuiScale();
+				double gx = (finder[0] + finder[2] * 0.3) / gs, gy = (finder[1] + finder[3] * 0.5) / gs;
+				float yaw = mc.player.getYRot();
+				ui.inputClick(gx, gy, 0);
+				ui.inputDrag(gx + 200 / gs, gy, 0);
+				ui.inputRelease(gx + 200 / gs, gy, 0);
+				float dragged = mc.player.getYRot() - yaw;
+				check(String.format(Locale.ROOT, "Ziehen im Sucher dreht den Blick (%.1f° bei 200 Pixeln)", dragged),
+						Math.abs(dragged - 18f) < 0.6f);
+				AutoTest.key(mc, Keys.code("key.keyboard.left"));
+				float keyed = mc.player.getYRot() - yaw - dragged;
+				check(String.format(Locale.ROOT, "Pfeiltaste links dreht den Blick (%.1f°)", keyed), Math.abs(keyed + 5f) < 0.3f);
 				look(mc, SCENE_YAW, 10f);
 				next(50);
 				return;
+			}
 			case 56: {
 				int[] finder = ui.testViewfinder();
 				int[] screen = spot("screen");
@@ -608,10 +623,62 @@ public final class ReelsTest {
 				return;
 			}
 			case 57:
+				// Die Kamera in kleinen Fenstern (mit der echten Schrift): quer und hochkant, dazu ein hohes Fenster.
+				windowSize(854, 480);
+				next(45);
+				return;
+			case 58: {
+				int[] finder = ui.testViewfinder();
+				int[] screen = spot("screen");
+				check("Fenster 854×480: Sucher-Textur " + (finder == null ? "fehlt" : finder[0] + "×" + finder[1]) + " für " + screen[2]
+						+ "×" + screen[3] + " Fensterpixel", Mc.window().getWidth() == 854 && finder != null
+						&& finder[0] >= 0.9 * screen[2] && finder[1] >= 0.9 * screen[3]);
+				check("alle Knöpfe der Kamera sind da (quer, 854×480)", ui.testSpot("camShutter") != null
+						&& ui.testSpot("camFlip") != null && ui.testSpot("camBack") != null && ui.testSpot("camSelfie") != null);
+				AutoTest.shot(mc, "trsclient-reels-16d-quer-kamera-854");
+				next(15);
+				return;
+			}
+			case 59:
+				AutoTest.key(mc, Keys.code("key.keyboard.r"));
+				check("R dreht auch in der Kamera", ui.testHold() == PhoneHold.PORTRAIT && ui.testView() == PhoneUi.View.CAMERA);
+				next(45);
+				return;
+			case 60:
+				check("alle Knöpfe der Kamera sind da (hochkant, 854×480)", ui.testSpot("camShutter") != null
+						&& ui.testSpot("camFlip") != null && ui.testSpot("camBack") != null && ui.testSpot("camSelfie") != null);
+				armCheck("Kamera hochkant, Fenster 854×480");
+				AutoTest.shot(mc, "trsclient-reels-16e-hochkant-kamera-854");
+				next(15);
+				return;
+			case 61:
+				windowSize(800, 1000);
+				next(45);
+				return;
+			case 62: {
+				int[] finder = ui.testViewfinder();
+				int[] screen = spot("screen");
+				check("Fenster 800×1000: Sucher-Textur " + (finder == null ? "fehlt" : finder[0] + "×" + finder[1]) + " für " + screen[2]
+						+ "×" + screen[3] + " Fensterpixel", finder != null && finder[0] >= 0.9 * screen[2] && finder[1] >= 0.9 * screen[3]);
+				AutoTest.shot(mc, "trsclient-reels-16f-hochkant-kamera-800x1000");
+				next(15);
+				return;
+			}
+			case 63:
+				AutoTest.key(mc, Keys.code("key.keyboard.r"));
+				windowSize(1920, 1080);
+				next(50);
+				return;
+			case 64:
+				check("zurück: Fenster 1920×1080, Handy quer, Kamera offen", Mc.window().getWidth() == 1920
+						&& Mc.window().getHeight() == 1080 && ui.testHold() == PhoneHold.LANDSCAPE && ui.testView() == PhoneUi.View.CAMERA);
+				next(10);
+				return;
+			case 65:
 				clickSpot(mc, "camShutter");
 				next(5);
 				return;
-			case 58: {
+			case 66: {
 				if (!waitFor(ui.testView() == PhoneUi.View.COMPOSE, 100)) return;
 				Reels.Shot shot = ui.testShot();
 				int[] want = photoSize(PhoneHold.LANDSCAPE);
@@ -622,18 +689,18 @@ public final class ReelsTest {
 				next(10);
 				return;
 			}
-			case 59:
+			case 67:
 				AutoTest.shot(mc, "trsclient-reels-16c-quer-posten");
 				next(15);
 				return;
-			case 60:
+			case 68:
 				// Esc in „Neuer Post“: Foto verwerfen, zurück zur Kamera (echte Taste).
 				AutoTest.key(mc, Keys.code("key.keyboard.escape"));
 				check("Esc in „Neuer Post“ führt zurück zur Kamera, das Handy bleibt offen",
 						ui.testView() == PhoneUi.View.CAMERA && ReelsHooks.phoneOpen() && !ui.isClosing());
 				next(10);
 				return;
-			case 61: {
+			case 69: {
 				if (!waitFor(retryFile == null || !Files.exists(retryFile), 40)) return;
 				check("Esc hat das Foto gelöscht", retryFile != null && !Files.exists(retryFile));
 				AutoTest.key(mc, Keys.code("key.keyboard.escape"));
@@ -643,21 +710,21 @@ public final class ReelsTest {
 				next(15);
 				return;
 			}
-			case 62:
+			case 70:
 				ui.testForceSlim(null);
 				// Versuch: leichter Weichzeichner hinter dem Handy (ab Werk aus).
 				ReelsHooks.testBlur(true);
 				next(15);
 				return;
-			case 63:
+			case 71:
 				AutoTest.shot(mc, "trsclient-reels-11e-quer-weichzeichner");
 				next(15);
 				return;
-			case 64:
+			case 72:
 				ReelsHooks.testBlur(false);
 				next(10);
 				return;
-			case 65: {
+			case 73: {
 				// Wegstecken mit der Handy-Taste (echte Taste H; sie gilt, weil sie seit dem Öffnen „los“ war).
 				AutoTest.key(mc, Keys.code("key.keyboard.h"));
 				check("Taste H steckt das Handy weg (Schließen läuft)", ui.isClosing() || !ReelsHooks.phoneOpen());
@@ -665,7 +732,7 @@ public final class ReelsTest {
 				next(30);
 				return;
 			}
-			case 66: {
+			case 74: {
 				check("Handy ist zu", !ReelsHooks.phoneOpen() && Mc.screen() == null);
 				check("aufgeräumt (dispose)", ui.disposed());
 				check("Handy-Taste ist wieder frei (Sperre gelöst, weil die Taste los ist)", !reels.keyGate().blocked());
@@ -682,11 +749,11 @@ public final class ReelsTest {
 				next(20);
 				return;
 			}
-			case 67:
+			case 75:
 				AutoTest.shot(mc, "trsclient-reels-17-nachher");
 				next(15);
 				return;
-			case 68: {
+			case 76: {
 				// Aus der Außenansicht: das Handy stellt für die Dauer auf Ich-Sicht.
 				mc.options.setCameraType(CameraType.THIRD_PERSON_BACK);
 				boolean opened = ReelsHooks.open();
@@ -696,7 +763,7 @@ public final class ReelsTest {
 				next(20);
 				return;
 			}
-			case 69: {
+			case 77: {
 				// Etwas anderes ersetzt den Bildschirm (wie Tod oder Verbindungsende): trotzdem aufräumen.
 				PhoneUi open = ui;
 				Mc.setScreen(null);
