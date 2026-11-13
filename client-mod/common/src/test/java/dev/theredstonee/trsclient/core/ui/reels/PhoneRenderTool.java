@@ -147,17 +147,21 @@ class PhoneRenderTool {
 			// Texel der Nenngröße → Pixel des Bildes (HD-Skins).
 			float fx = src.getWidth() / (float) texture.width, fy = src.getHeight() / (float) texture.height;
 			int tr = (argb >> 16) & 0xFF, tg = (argb >> 8) & 0xFF, tb = argb & 0xFF, ta = argb >>> 24;
-			if ((long) w * h <= 64) {
-				// Kleine Blits (Arm-Streifen, Gesicht) Texel für Texel: exakt, ohne Rundung des Bild-Zeichnens.
-				for (int y = 0; y < h; y++) {
-					for (int x = 0; x < w; x++) {
-						int px = Math.floorMod((int) Math.floor((u + x) * fx), src.getWidth());
-						int py = Math.floorMod((int) Math.floor((v + y) * fy), src.getHeight());
-						int p = src.getRGB(px, py);
+			if (w * fx * h * fy <= 64.5f) {
+				// Kleine Blits (Arm-Streifen, Gesicht) Texel für Texel: exakt, ohne Rundung des Bild-Zeichnens. Die Arme
+				// adressieren den Skin feiner als in ganzen Texeln und lesen etwas innerhalb – also je Bild-Texel den Teil
+				// des Blits füllen, der auf ihn fällt.
+				int x0 = (int) Math.floor(u * fx + 1e-4f), x1 = (int) Math.ceil((u + w) * fx - 1e-4f);
+				int y0 = (int) Math.floor(v * fy + 1e-4f), y1 = (int) Math.ceil((v + h) * fy - 1e-4f);
+				for (int ty = y0; ty < y1; ty++) {
+					for (int tx = x0; tx < x1; tx++) {
+						int p = src.getRGB(Math.floorMod(tx, src.getWidth()), Math.floorMod(ty, src.getHeight()));
 						int a = (p >>> 24) * ta / 255;
 						if (a == 0) continue;
+						float lx0 = Math.max(0f, tx / fx - u), lx1 = Math.min(w, (tx + 1) / fx - u);
+						float ly0 = Math.max(0f, ty / fy - v), ly1 = Math.min(h, (ty + 1) / fy - v);
 						g.setColor(new Color(((p >> 16) & 0xFF) * tr / 255, ((p >> 8) & 0xFF) * tg / 255, (p & 0xFF) * tb / 255, a));
-						g.fill(new java.awt.geom.Rectangle2D.Float(x, y, 1, 1));
+						g.fill(new java.awt.geom.Rectangle2D.Float(lx0, ly0, lx1 - lx0, ly1 - ly0));
 					}
 				}
 				return;

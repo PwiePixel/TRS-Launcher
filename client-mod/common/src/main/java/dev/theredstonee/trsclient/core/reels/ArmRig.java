@@ -41,8 +41,13 @@ public final class ArmRig {
 	public static final float TILT_DEG = 34f;
 	/** So weit liegt das Arm-Ende mindestens unter dem Fensterrand (Fensterpixel). */
 	public static final float MARGIN_PX = 2f;
-	/** Jeder Streifen reicht so weit über seinen Nachbarn zur Hand hin (Fensterpixel) – so bleibt keine Haarlinie offen. */
+	/**
+	 * Jeder Streifen reicht so weit über seinen Nachbarn zur Hand hin (Fensterpixel, senkrecht zur Kante gemessen) – so
+	 * bleibt keine Haarlinie offen.
+	 */
 	public static final float OVERLAP_PX = 0.75f;
+	/** Entlang des Arms wird ein Streifen dafür höchstens so viel länger (Fensterpixel; nie mehr als seine eigene Länge). */
+	static final float MAX_OVERLAP_PX = 4f;
 	/** Länge des Arms in Einheiten (Texel-Zeilen). */
 	static final int LENGTH_UNITS = ArmSkin.ROWS;
 	/** Höchste Verlängerung in Einheiten. */
@@ -249,10 +254,15 @@ public final class ArmRig {
 			double vy = ((p01[1] - p00[1]) + (p11[1] - p10[1])) / 2;
 			double ox = (p00[0] + p10[0] + p01[0] + p11[0]) / 4 - ux / 2 - vx / 2;
 			double oy = (p00[1] + p10[1] + p01[1] + p11[1]) / 4 - uy / 2 - vy / 2;
-			// Zur Hand hin etwas länger (nicht am Hand-Ende selbst, dort ist nichts zu überdecken).
+			// Zur Hand hin etwas länger (nicht am Hand-Ende selbst, dort ist nichts zu überdecken). Die Überlappung gilt
+			// senkrecht zur Streifenkante: die Innenseite liegt sehr schräg im Bild, entlang des Arms gemessen braucht
+			// sie dafür mehr – sonst blieben zwischen ihren Streifen einzelne Pixel offen.
 			double len = Math.sqrt(vx * vx + vy * vy);
-			if (i > 0 && overlapPx > 0f && len > 1e-6) {
-				double grow = 1 + overlapPx / len;
+			double across = Math.sqrt(ux * ux + uy * uy);
+			if (i > 0 && overlapPx > 0f && len > 1e-6 && across > 1e-6) {
+				double sin = Math.abs(ux * vy - uy * vx) / (across * len);
+				double along = Math.min(overlapPx / Math.max(sin, 1e-3), Math.max(overlapPx, Math.min(MAX_OVERLAP_PX, len)));
+				double grow = 1 + along / len;
 				vx *= grow;
 				vy *= grow;
 			}

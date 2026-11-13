@@ -321,7 +321,10 @@ final class FeedView {
 		String meta = null;
 		if (!land) {
 			String[] ago = ReelsTime.ago(post.createdAt, ui.now());
-			meta = I18n.tr(ago[0], ago[1]) + " · " + (post.selfie ? I18n.tr("reels.meta.selfie") : I18n.tr("reels.meta.phone"));
+			String when = I18n.tr(ago[0], ago[1]);
+			meta = when + " · " + (post.selfie ? I18n.tr("reels.meta.selfie") : I18n.tr("reels.meta.phone"));
+			// Lieber lesbar als vollständig: passt die ganze Zeile nicht in ihrer Größe, bleibt nur die Zeit.
+			if (PhoneText.width(c, meta, mMeta) > w) meta = when;
 		}
 		int metaGap = p(6);
 		int metaH = meta == null ? 0 : metaGap + PhoneText.height(mMeta);

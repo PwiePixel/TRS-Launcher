@@ -9,8 +9,9 @@ import dev.theredstonee.trsclient.core.ui.Canvas;
  * wie in den freigegebenen Bildern. Alle Maße sind Handy-Pixel aus dem Entwurf, umgerechnet über
  * {@link PhoneLayout#q} in Fensterpixel.
  *
- * <p>Reihenfolge: weicher Schatten, zwei Tiefen-Schichten (nach rechts unten versetzt), Gehäuse mit hellem Rand oben
- * und links, Seitentasten, Lampe (nur hochkant), schwarzer Bildschirm. Der Inhalt des Bildschirms kommt danach.
+ * <p>Reihenfolge: zwei Tiefen-Schichten (nach rechts unten versetzt), Gehäuse mit hellem Rand oben und links,
+ * Seitentasten, Lampe (nur hochkant), schwarzer Bildschirm. Davor kommt der weiche Schatten ({@link PhoneShadow}),
+ * danach der Inhalt des Bildschirms.
  */
 final class PhoneBody {
 	static final int BODY = 0xFF2B2B38;
@@ -30,23 +31,16 @@ final class PhoneBody {
 
 	/** Stufe der Ecken (Handy-Pixel); jede Ecke hat zwei Stufen. */
 	static final float STEP = 8f;
-	/** Der weiche Schatten: so viele Schichten, zusammen so deckend (in der Mitte). */
-	static final int SHADOW_LAYERS = 18;
-	static final float SHADOW_ALPHA = 0.55f;
-	/** Abstand von Schicht zu Schicht (Handy-Pixel) und wie viele davon innerhalb des Schatten-Rechtecks liegen. */
-	static final float SHADOW_STEP = 5f;
-	static final int SHADOW_INSIDE = 8;
 
 	private PhoneBody() {
 	}
 
-	/** Zeichnet Schatten und Gehäuse; danach ist der Bildschirm schwarz und wartet auf seinen Inhalt. */
+	/** Zeichnet das Gehäuse; danach ist der Bildschirm schwarz und wartet auf seinen Inhalt. */
 	static void draw(Canvas c, PhoneLayout l) {
 		int x = l.phoneX, y = l.phoneY, w = l.phoneW, h = l.phoneH;
 		int s = l.px(STEP);
 		boolean land = l.hold != PhoneHold.PORTRAIT;
 
-		shadow(c, l, x + r(l, 24), y + r(l, 34), w, h);
 		stepped(c, x + r(l, 14), y + r(l, 14), w, h, s, DEPTH_FAR);
 		stepped(c, x + r(l, 7), y + r(l, 7), w, h, s, DEPTH_NEAR);
 
@@ -109,21 +103,5 @@ final class PhoneBody {
 		c.fill(x, y + 2 * s, x + w, y + h - 2 * s, argb);
 		c.fill(x + s, y + h - 2 * s, x + w - s, y + h - s, argb);
 		c.fill(x + 2 * s, y + h - s, x + w - 2 * s, y + h, argb);
-	}
-
-	/**
-	 * Weicher Schatten unter dem Handy: {@value #SHADOW_LAYERS} sehr durchsichtige Rechtecke, von außen nach innen
-	 * kleiner – übereinander ergeben sie in der Mitte {@value #SHADOW_ALPHA} Deckkraft und nach außen einen weichen
-	 * Rand ohne sichtbare Stufen.
-	 */
-	private static void shadow(Canvas c, PhoneLayout l, int x, int y, int w, int h) {
-		double each = 1.0 - Math.pow(1.0 - SHADOW_ALPHA, 1.0 / SHADOW_LAYERS);
-		int argb = Math.max(1, (int) Math.round(each * 255.0)) << 24;
-		int step = l.px(SHADOW_STEP);
-		for (int i = SHADOW_LAYERS - 1; i >= 0; i--) {
-			int grow = (i - SHADOW_INSIDE) * step;
-			if (w + 2 * grow <= 0 || h + 2 * grow <= 0) continue;
-			c.fill(x - grow, y - grow, x + w + grow, y + h + grow, argb);
-		}
 	}
 }

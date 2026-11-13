@@ -102,18 +102,39 @@ class PhoneUiTest {
 
 		static final class Img {
 			final TextureRef texture;
+			/** Ausschnitt in ganzen Texeln (bei den Armen: die Texel, in denen der Blit liest). */
 			final float u, v;
 			final int w, h, argb;
 			/** x' = m0·x + m2·y + m4, y' = m1·x + m3·y + m5 (Texel → Fensterpixel). */
 			final double[] m;
+			/** Wie gezeichnet: Ausschnitt in den Einheiten der Textur (Arme: 64tel-Texel, etwas nach innen genommen). */
+			final float rawU, rawV;
+			final int rawW, rawH;
 
 			Img(TextureRef texture, float u, float v, int w, int h, int argb, double[] m) {
 				this.texture = texture;
-				this.u = u;
-				this.v = v;
-				this.w = w;
-				this.h = h;
+				this.rawU = u;
+				this.rawV = v;
+				this.rawW = w;
+				this.rawH = h;
 				this.argb = argb;
+				// Der Skin ist 64×64; ist er feiner adressiert (Arme), hier zurück in ganze Texel – die Fläche bleibt gleich.
+				int sub = "skin".equals(texture.id) ? texture.width / 64 : 1;
+				if (sub > 1) {
+					this.u = (float) Math.floor(u / sub);
+					this.v = (float) Math.floor(v / sub);
+					this.w = Math.max(1, Math.round(w / (float) sub));
+					this.h = Math.max(1, Math.round(h / (float) sub));
+					m[0] *= w / (double) this.w;
+					m[1] *= w / (double) this.w;
+					m[2] *= h / (double) this.h;
+					m[3] *= h / (double) this.h;
+				} else {
+					this.u = u;
+					this.v = v;
+					this.w = w;
+					this.h = h;
+				}
 				this.m = m;
 			}
 
@@ -809,6 +830,53 @@ class PhoneUiTest {
 	}
 
 	@Test
+	void armBlitsReadInsideTheirTexelsAndTheInnerFaceReachesUnderTheFront() {
+		for (boolean slim : new boolean[]{false, true}) {
+			PhoneUi ui = ui(PhoneHold.LANDSCAPE);
+			ui.testForceSlim(Boolean.valueOf(slim));
+			RecCanvas c = frame(ui);
+			int arms = 0;
+			for (RecCanvas.Img i : c.imagesOf("skin")) {
+				if (i.texture.width == 64) continue; // Kopf im Feed
+				arms++;
+				assertEquals(64 * ArmDraw.SUB, i.texture.width);
+				assertEquals(64 * ArmDraw.SUB, i.texture.height);
+				// Ringsum ein Stück innerhalb der Texel: kein Pixel an der Kante trifft die Nachbarzeile oder -spalte.
+				assertEquals(ArmDraw.INSET_U, Math.round(i.rawU) % ArmDraw.SUB, "quer");
+				assertEquals(ArmDraw.INSET_V, Math.round(i.rawV) % ArmDraw.SUB, "längs");
+				assertEquals(i.w * ArmDraw.SUB - 2 * ArmDraw.INSET_U, i.rawW);
+				assertEquals(ArmDraw.SUB - 2 * ArmDraw.INSET_V, i.rawH);
+				assertEquals(1, i.h, "eine Texel-Zeile je Streifen");
+			}
+			assertEquals(ui.testArmBlits(), arms);
+			// Innenseite: an der Kante zur Vorderseite so viel breiter als die Fläche des Arms (damit kein Loch bleibt).
+			PhoneLayout l = PhoneLayout.of(host.w, host.h, PhoneHold.LANDSCAPE);
+			for (int arm = 0; arm < 2; arm++) {
+				boolean left = arm == 0;
+				List<ArmRig.Strip> strips = ArmRig.of(l, left).strips(ArmRig.Face.INNER, ArmRig.stripsPerRow(l.k));
+				List<RecCanvas.Img> blits = inner(c, left, false, slim);
+				assertEquals(4 * strips.size(), blits.size());
+				for (int k = 0; k < strips.size(); k++) {
+					ArmRig.Strip strip = strips.get(k);
+					double face = Math.hypot(strip.a, strip.b), along = Math.hypot(strip.c, strip.d);
+					// Senkrecht zur gemeinsamen Kante gemessen (die Fläche liegt schräg): so weit unter der Vorderseite.
+					double sin = Math.abs(strip.a * (double) strip.d - strip.b * (double) strip.c) / (face * along);
+					double reach = (blits.get(4 * k).across() - face) * sin;
+					assertTrue(blits.get(4 * k).across() <= 1.5 * face + 0.01, "höchstens die halbe Fläche breiter");
+					if (blits.get(4 * k).across() < 1.5 * face - 0.01) {
+						assertEquals(ArmDraw.EDGE_OVERLAP_PX, reach, 0.01, "Streifen " + k);
+					}
+					// Die äußere Kante (weg von der Vorderseite) bleibt, wo sie war.
+					RecCanvas.Img i = blits.get(4 * k);
+					double[] outer = left ? i.corner(0) : i.corner(1);
+					assertEquals(left ? strip.e : strip.e + strip.a, outer[0], 0.01, "Streifen " + k);
+				}
+			}
+			ui.dispose();
+		}
+	}
+
+	@Test
 	void sleeveLayerFollowsTheSkinSettingsPerArm() {
 		host.sleeveLeft = false;
 		PhoneUi ui = ui(PhoneHold.LANDSCAPE);
@@ -926,6 +994,29 @@ class PhoneUiTest {
 		assertNotNull(ui.testSpot("camera"));
 		assertNotNull(ui.testSpot("rotate"));
 		assertNotNull(ui.testSpot("heart"));
+		ui.dispose();
+	}
+
+	@Test
+	void metaLineStaysReadableAndDropsItsSecondPartWhenItDoesNotFit() {
+		// Hochkant bei 1920×1080: „2 h ago · with the phone in the game“ passt in seiner Größe nicht in die Spalte.
+		post("Schaut mal!", host.name, 2, false);
+		PhoneUi ui = ui(PhoneHold.PORTRAIT);
+		RecCanvas c = frame(ui);
+		RecCanvas.Text meta = null;
+		for (RecCanvas.Text t : c.texts) if (t.text.contains("2 h ago")) meta = t;
+		assertNotNull(meta, "Texte: " + c.strings());
+		assertEquals("2 h ago", meta.text, "lieber lesbar als vollständig");
+		assertEquals(PhoneText.scale(21, PhoneLayout.of(host.w, host.h, PhoneHold.PORTRAIT).q), meta.scale, 1e-6, "volle Größe");
+		assertTrue(meta.scale >= 2, "bei 1080p mindestens doppelt so groß wie die Spielschrift");
+		ui.dispose();
+
+		// Ein kurzer Zusatz (Selfie) passt und bleibt.
+		long at = NOON - 3600000L;
+		assertNotNull(backend.post(ReelsPost.newId(at, UTC, ++salt) + ".png", 608, 1080, true, true, "Ich", host.name, at));
+		ui = ui(PhoneHold.PORTRAIT);
+		c = frame(ui);
+		assertTrue(c.strings().contains("1 h ago · " + I18n.tr("reels.meta.selfie")), "Texte: " + c.strings());
 		ui.dispose();
 	}
 
@@ -1240,7 +1331,8 @@ class PhoneUiTest {
 		PhoneUi ui = ui(PhoneHold.LANDSCAPE);
 		for (int i = 0; i < 4; i++) frame(ui);
 		assertTrue(store.live.contains(PhoneVeil.TEXTURE), "Schleier: " + store.live);
-		assertEquals(3, store.live.size(), "Schleier + beide Fotos (das Nachbarfoto wird mitgeladen): " + store.live);
+		assertTrue(store.live.contains(PhoneShadow.TEXTURE), "Schatten: " + store.live);
+		assertEquals(4, store.live.size(), "Schleier + Schatten + beide Fotos (das Nachbarfoto wird mitgeladen): " + store.live);
 		backend.toggleLike(p.id);
 		assertTrue(backend.dirty());
 		assertFalse(reels.keyGate().blocked());
@@ -1248,7 +1340,7 @@ class PhoneUiTest {
 		ui.dispose();
 		assertTrue(ui.disposed());
 		assertTrue(store.live.isEmpty(), "alle Texturen frei: " + store.live);
-		assertEquals(3, store.released.size());
+		assertEquals(4, store.released.size());
 		assertTrue(reels.keyGate().blocked(), "die Handy-Taste ist bis zum Loslassen gesperrt");
 		assertFalse(backend.dirty(), "der Feed ist gesichert");
 		assertTrue(new LocalReelsBackend(tmp, UTC).feed().get(0).likedByMe);
@@ -1258,7 +1350,7 @@ class PhoneUiTest {
 		assertFalse(reels.keyGate().blocked());
 		int uploads = store.uploads;
 		ui.dispose();
-		assertEquals(3, store.released.size());
+		assertEquals(4, store.released.size());
 		assertFalse(reels.keyGate().blocked(), "das zweite Aufräumen sperrt die Taste nicht noch einmal");
 		// Ein verirrtes Bild nach dem Aufräumen lädt nichts mehr hoch.
 		RecCanvas c = new RecCanvas(host.gui);
@@ -1313,6 +1405,89 @@ class PhoneUiTest {
 			if (f.x1 <= 0 && f.y1 <= 0) keep *= 1 - (f.argb >>> 24) / 255.0;
 		}
 		assertEquals(PhoneVeil.ALPHA_EDGE, 1 - keep, 0.06);
+	}
+
+	@Test
+	void shadowIsSoftRoundAndFallsOnTheArms() {
+		// Die Ecken-Textur: außen nichts, innen die volle Deckkraft, dazwischen ohne sichtbare Stufen.
+		assertEquals(0f, PhoneShadow.profile(0f), 1e-6);
+		assertEquals(0.5f, PhoneShadow.profile(0.5f), 1e-4);
+		assertEquals(1f, PhoneShadow.profile(1f), 1e-6);
+		int n = 190;
+		int[] px = PhoneShadow.pixels(n);
+		int full = Math.round(PhoneShadow.ALPHA * 255f);
+		assertEquals(0, px[0] >>> 24, "außen an der Ecke");
+		assertEquals(full, px[n * n - 1] >>> 24, "innen");
+		int step = 0;
+		for (int y = 0; y < n; y++) {
+			for (int x = 0; x < n; x++) {
+				int p = px[y * n + x];
+				assertEquals(0, p & 0xFFFFFF, "schwarz");
+				assertEquals(p, px[x * n + y], "an der Diagonale spiegelgleich (wird gedreht wiederverwendet)");
+				if (x > 0) {
+					int d = (p >>> 24) - (px[y * n + x - 1] >>> 24);
+					assertTrue(d >= 0, "wird nach innen nie heller");
+					step = Math.max(step, d);
+				}
+			}
+			assertEquals(Math.round(PhoneShadow.ALPHA * 255f * PhoneShadow.profile(y / (float) (n - 1))), px[y * n + n - 1] >>> 24,
+					"letzte Spalte = reiner Kantenverlauf");
+		}
+		assertTrue(step <= 2, "keine sichtbaren Bänder: größter Sprung " + step);
+
+		for (PhoneHold hold : PhoneHold.values()) {
+			PhoneUi ui = ui(hold);
+			RecCanvas c = frame(ui);
+			PhoneLayout l = PhoneLayout.of(host.w, host.h, hold);
+			List<RecCanvas.Img> parts = c.imagesOf(PhoneShadow.TEXTURE);
+			assertEquals(8, parts.size(), "vier Ecken + vier Kanten");
+			int s = PhoneShadow.edge(l);
+			double x0 = l.phoneX + Math.round(PhoneShadow.OFFSET_X * l.q) - s / 2, y0 = l.phoneY + Math.round(PhoneShadow.OFFSET_Y * l.q) - s / 2;
+			double x1 = x0 + l.phoneW + s, y1 = y0 + l.phoneH + s;
+			// Zusammen mit dem Rechteck in der Mitte decken die Teile genau die Schattenfläche – ohne Lücke, ohne Überlappung.
+			RecCanvas.Fill mid = fillOf(c, full << 24, true);
+			assertNotNull(mid, "Mitte des Schattens");
+			double area = (mid.x2 - mid.x1) * (mid.y2 - mid.y1);
+			double minX = mid.x1, minY = mid.y1, maxX = mid.x2, maxY = mid.y2;
+			for (RecCanvas.Img i : parts) {
+				assertEquals(0xFFFFFFFF, i.argb);
+				area += (i.maxX() - i.minX()) * (i.maxY() - i.minY());
+				minX = Math.min(minX, i.minX());
+				minY = Math.min(minY, i.minY());
+				maxX = Math.max(maxX, i.maxX());
+				maxY = Math.max(maxY, i.maxY());
+				// Ganze Fensterpixel: sonst bliebe zwischen den Teilen eine Haarlinie.
+				for (double v : new double[]{i.minX(), i.minY(), i.maxX(), i.maxY()}) assertEquals(Math.rint(v), v, 0.01, hold + ": " + v);
+			}
+			assertEquals(x0, minX, 0.01, hold.toString());
+			assertEquals(y0, minY, 0.01, hold.toString());
+			assertEquals(x1, maxX, 0.01, hold.toString());
+			assertEquals(y1, maxY, 0.01, hold.toString());
+			assertEquals((x1 - x0) * (y1 - y0), area, 0.0005 * (x1 - x0) * (y1 - y0), hold + ": Fläche");
+			assertEquals(x0 + s, mid.x1, 1e-3);
+			assertEquals(y1 - s, mid.y2, 1e-3);
+			// Nach den Armen (er fällt auf sie), vor dem Gehäuse.
+			List<RecCanvas.Img> skin = c.imagesOf("skin");
+			int lastArm = -1;
+			for (int i = 0; i < c.order.size(); i++) {
+				Object o = c.order.get(i);
+				if (o instanceof RecCanvas.Img && ((RecCanvas.Img) o).w != 8 && skin.contains(o)) lastArm = i;
+			}
+			int first = c.order.indexOf(parts.get(0));
+			assertTrue(lastArm >= 0 && lastArm < first, hold + ": Schatten nach den Armen");
+			assertTrue(first < c.order.indexOf(fillOf(c, PhoneBody.BODY, true)), hold + ": Schatten vor dem Gehäuse");
+			ui.dispose();
+			assertFalse(store.live.contains(PhoneShadow.TEXTURE), "Schatten-Textur freigegeben");
+		}
+
+		// Ersatz ohne Texturen: Schichten, die in der Mitte zusammen dieselbe Deckkraft ergeben.
+		PhoneLayout l = PhoneLayout.of(1920, 1080, PhoneHold.LANDSCAPE);
+		RecCanvas plain = new RecCanvas(1);
+		PhoneShadow.bands(plain, l);
+		assertEquals(PhoneShadow.BAND_LAYERS, plain.fills.size());
+		double keep = 1;
+		for (RecCanvas.Fill f : plain.fills) keep *= 1 - (f.argb >>> 24) / 255.0;
+		assertEquals(PhoneShadow.ALPHA, 1 - keep, 0.05);
 	}
 
 	// --- Bausteine ---

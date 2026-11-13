@@ -100,6 +100,7 @@ public final class PhoneUi extends UiScreen {
 	private final FeedPager pager = new FeedPager();
 	private final FeedView feedView = new FeedView(this);
 	private final PhoneVeil veil = new PhoneVeil();
+	private final PhoneShadow shadow = new PhoneShadow();
 	private final Map<String, int[]> spots = new HashMap<String, int[]>();
 	/** Eingabefeld des Kommentar-Blatts. */
 	final TextInput commentInput = new TextInput(ReelsComment.MAX_TEXT);
@@ -170,6 +171,7 @@ public final class PhoneUi extends UiScreen {
 				boolean slim = forceSlim != null ? forceSlim.booleanValue() : host.slimSkin();
 				armBlits = ArmDraw.draw(c, leftArm, rightArm, ArmRig.stripsPerRow(l.k), host.skin(), slim, host.sleeve(true),
 						host.sleeve(false));
+				shadow.draw(c, l);
 				PhoneBody.draw(c, l);
 				spot("phone", l.phoneX, l.phoneY, l.phoneW, l.phoneH);
 				spot("screen", l.screenX, l.screenY, l.screenW, l.screenH);
@@ -474,6 +476,7 @@ public final class PhoneUi extends UiScreen {
 			photos = null;
 		}
 		veil.release();
+		shadow.release();
 		reels.keyGate().block();
 		reels.save();
 	}

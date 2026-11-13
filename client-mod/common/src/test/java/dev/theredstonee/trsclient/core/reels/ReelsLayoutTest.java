@@ -320,7 +320,9 @@ class ReelsLayoutTest {
 						}
 						assertTrue(worst < 0.75, where + ": Ecken um " + worst + " Pixel verfehlt");
 						if (w[0] == 1920 && w[1] == 1080) assertTrue(worst < 0.5, where + ": bei 1080p unter einem halben Pixel");
-						// Mit Überlappung: gleiche Schulter-Kante, zur Hand hin 0,75 Pixel länger – nur nicht am Hand-Ende.
+						// Mit Überlappung: gleiche Schulter-Kante, zur Hand hin länger – nur nicht am Hand-Ende. Die 0,75 Pixel
+						// gelten senkrecht zur Streifenkante; die schräg liegende Innenseite wird dafür entlang des Arms
+						// entsprechend mehr verlängert (höchstens 4 Pixel bzw. ihre eigene Länge).
 						List<ArmRig.Strip> plain = rig.strips(face, perRow, 0f);
 						List<ArmRig.Strip> drawn = rig.strips(face, perRow);
 						assertEquals(plain.size(), drawn.size());
@@ -330,8 +332,21 @@ class ReelsLayoutTest {
 							assertEquals(a.f, b.f, 1e-4);
 							assertEquals(a.a, b.a, 1e-4);
 							assertEquals(a.b, b.b, 1e-4);
-							double extra = Math.hypot(b.c, b.d) - Math.hypot(a.c, a.d);
-							assertEquals(i == 0 ? 0.0 : ArmRig.OVERLAP_PX, extra, 1e-3, where + " Streifen " + i);
+							double len = Math.hypot(a.c, a.d);
+							double extra = Math.hypot(b.c, b.d) - len;
+							if (i == 0) {
+								assertEquals(0.0, extra, 1e-3, where + " Streifen 0");
+							} else {
+								double sin = Math.abs(a.a * (double) a.d - a.b * (double) a.c) / (Math.hypot(a.a, a.b) * len);
+								double limit = Math.max(ArmRig.OVERLAP_PX, Math.min(ArmRig.MAX_OVERLAP_PX, len));
+								assertTrue(extra >= ArmRig.OVERLAP_PX - 1e-3 && extra <= limit + 1e-3, where + " Streifen " + i + ": " + extra);
+								if (extra < limit - 1e-3) {
+									assertEquals(ArmRig.OVERLAP_PX, extra * sin, 2e-3, where + " Streifen " + i + ": senkrecht gemessen");
+								}
+								if (face == ArmRig.Face.FRONT && w[0] == 1920 && w[1] == 1080) {
+									assertEquals(ArmRig.OVERLAP_PX, extra, 0.05, where + ": die Vorderseite liegt fast gerade");
+								}
+							}
 							assertNotNull(Affine.decompose(b.a / 4f, b.b / 4f, b.c, b.d), where);
 						}
 					}
