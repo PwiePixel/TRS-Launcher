@@ -8,6 +8,7 @@ import dev.theredstonee.trsclient.core.reels.ReelsComment;
 import dev.theredstonee.trsclient.core.reels.ReelsPost;
 import dev.theredstonee.trsclient.core.ui.Canvas;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -286,12 +287,29 @@ final class CommentsView {
 
 	// --- Liste ---
 
+	/** Eine Zeile der Liste, wie sie in diesem Bild steht. */
+	private static final class Laid {
+		final int index;
+		final int y;
+		final int h;
+		final int indent;
+		final List<List<CommentLayout.Piece>> lines;
+
+		Laid(int index, int y, int h, int indent, List<List<CommentLayout.Piece>> lines) {
+			this.index = index;
+			this.y = y;
+			this.h = h;
+			this.indent = indent;
+			this.lines = lines;
+		}
+	}
+
 	private void list(ReelsPost post, int left, int width, int listTop, int listBottom, int mC) {
-		int lineH = LINE * mC;
 		int textH = PhoneText.height(mC);
 		int gap = p(6);
 		List<CommentThread.Row> rows = ui.commentRows(post);
 		int n = rows.size();
+		String reveal = ui.takeCommentReveal();
 		if (n == 0) {
 			ui.commentScrollLimit(1);
 			int ty = listTop + Math.max(0, (listBottom - listTop - textH) / 2);
@@ -301,26 +319,64 @@ final class CommentsView {
 			return;
 		}
 		fresh();
-		int maxLines = land ? MAX_LINES_LAND : MAX_LINES_PORT;
 		int skip = Math.max(0, Math.min(n - 1, ui.commentSkip()));
+		List<Laid> laid = lay(rows, skip, width, listTop, listBottom, mC, gap);
+		if (reveal != null) {
+			// Ein eben gesendeter Kommentar soll zu sehen sein: am liebsten mit der Liste ganz unten, sonst als unterste Zeile.
+			int at = -1;
+			for (int i = 0; i < n && at < 0; i++) if (reveal.equals(rows.get(i).comment.id)) at = i;
+			if (at >= 0) {
+				List<Laid> bottom = skip == 0 ? laid : lay(rows, 0, width, listTop, listBottom, mC, gap);
+				skip = shows(bottom, at) ? 0 : n - 1 - at;
+				laid = skip == 0 ? bottom : lay(rows, skip, width, listTop, listBottom, mC, gap);
+				ui.commentScrollTo(n, skip);
+			}
+		}
 		String targetId = ui.commentMode() == PhoneUi.CommentMode.NEW ? null : ui.commentTargetId();
+		for (Laid row : laid) {
+			CommentThread.Row r = rows.get(row.index);
+			boolean target = targetId != null && targetId.equals(r.comment.id);
+			if (r.reply) {
+				c.fill(left, row.y, left + Math.min(row.indent, l.px(3)), row.y + row.h, target ? FeedView.AMBER : FeedView.BAR_LINE);
+			} else if (target) {
+				// Oberste Ebene: der Balken steht links neben dem Text, im Rand des Blatts.
+				int bx = left - p(8);
+				c.fill(bx, row.y, Math.min(left, bx + l.px(3)), row.y + row.h, FeedView.AMBER);
+			}
+			row(row.index, r.comment, row.lines, left + row.indent, row.y, width - row.indent, row.h, mC, gap);
+			if (target) ui.spot("commentTarget", left + row.indent, row.y, width - row.indent, row.h);
+		}
+		ui.commentsShown = laid.size();
+		// Weiter nach oben blättern geht nur, solange der älteste Kommentar noch nicht zu sehen ist.
+		ui.commentScrollLimit(shows(laid, 0) ? skip + 1 : n);
+	}
+
+	private static boolean shows(List<Laid> laid, int index) {
+		for (Laid row : laid) if (row.index == index) return true;
+		return false;
+	}
+
+	/**
+	 * Legt die Liste aus, von unten nach oben: {@code skip} Zeilen sind unten übersprungen. Eine Zeile, die nicht mehr
+	 * ganz passt, fällt weg – nur die unterste wird notfalls auf weniger Textzeilen gekürzt (wenn über dem Feld viel
+	 * steht), damit der Kommentar, um den es geht, nie ganz verschwindet.
+	 */
+	private List<Laid> lay(List<CommentThread.Row> rows, int skip, int width, int listTop, int listBottom, int mC, int gap) {
+		List<Laid> out = new ArrayList<Laid>();
+		int lineH = LINE * mC;
+		int textH = PhoneText.height(mC);
+		int maxLines = land ? MAX_LINES_LAND : MAX_LINES_PORT;
 		int y = listBottom;
-		int shown = 0;
-		boolean oldest = false;
-		for (int i = n - 1 - skip; i >= 0; i--) {
+		for (int i = rows.size() - 1 - skip; i >= 0; i--) {
 			CommentThread.Row row = rows.get(i);
 			int indent = row.reply ? Math.min(p(18), width / 4) : 0;
 			int w = width - indent;
 			if (w < 6 * mC) break;
 			List<List<CommentLayout.Piece>> lines = lines(row.comment, w / mC, maxLines, true);
-			if (lines.isEmpty()) {
-				if (i == 0) oldest = true;
-				continue;
-			}
+			if (lines.isEmpty()) continue;
 			int rowH = lines.size() * lineH + textH;
 			if (y - rowH < listTop) {
-				if (shown > 0) break;
-				// Der unterste Kommentar passt allein nicht ganz (viel steht über dem Feld): dann mit weniger Zeilen.
+				if (!out.isEmpty()) break;
 				int fit = (y - listTop - textH) / lineH;
 				if (fit < 1) break;
 				lines = lines(row.comment, w / mC, fit, false);
@@ -328,23 +384,10 @@ final class CommentsView {
 				rowH = lines.size() * lineH + textH;
 			}
 			y -= rowH;
-			boolean target = targetId != null && targetId.equals(row.comment.id);
-			if (row.reply) {
-				c.fill(left, y, left + Math.min(indent, l.px(3)), y + rowH, target ? FeedView.AMBER : FeedView.BAR_LINE);
-			} else if (target) {
-				// Oberste Ebene: der Balken steht links neben dem Text, im Rand des Blatts.
-				int bx = left - p(8);
-				c.fill(bx, y, Math.min(left, bx + l.px(3)), y + rowH, FeedView.AMBER);
-			}
-			row(i, row.comment, lines, left + indent, y, w, rowH, mC, gap);
-			if (target) ui.spot("commentTarget", left + indent, y, w, rowH);
-			shown++;
-			if (i == 0) oldest = true;
+			out.add(new Laid(i, y, rowH, indent, lines));
 			y -= gap;
 		}
-		ui.commentsShown = shown;
-		// Weiter nach oben blättern geht nur, solange der älteste Kommentar noch nicht zu sehen ist.
-		ui.commentScrollLimit(oldest ? skip + 1 : n);
+		return out;
 	}
 
 	/** Der Zwischenspeicher der umbrochenen Kommentare gilt nur für denselben Feed, dasselbe Layout, dieselbe Sprache. */

@@ -55,7 +55,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Das MC-Reels-Handy ohne Spiel: zeichnen in Fensterpixeln bei jeder GUI-Skalierung, Arme aus dem Skin (breit, schlank,
  * Innenseite, Ärmel), Texte bleiben auf dem Bildschirm des Handys, Feed blättern, Herz, Kommentare, Drehen, Schließen
  * und Aufräumen. Dazu die Blätter „Bild“ (speichern, kopieren, Ordner öffnen), „Feed“ (Filter und Reihenfolge) und
- * „Streak“ (Streak-Schutz) und die Marken am Post. Zwischenablage und Dateimanager des Systems fasst kein Test an: beides
+ * „Streak“ (Streak-Schutz), die Marken am Post, und das Kommentar-Blatt: antworten, bearbeiten, die bewegliche
+ * Schreibmarke, Namensvorschläge, Erwähnungen und ihre Meldung. Zwischenablage und Dateimanager des Systems fasst kein Test an: beides
  * geht über {@link FakeHost}.
  */
 class PhoneUiTest {
@@ -693,6 +694,24 @@ class PhoneUiTest {
 		reels.comment(top.id, "Rotkaeppchen_2010", "Wie süß! Den will ich auch haben, wo hast du den denn gefunden?", NOON - 1000);
 		reels.comment(top.id, host.name, "Im Bambuswald hinter dem Dorf.", NOON - 500);
 		reels.comment(old.id, "Du", "Schön.", NOON - 100);
+		// Ein langer Faden unter dem ersten Post: ein bearbeiteter eigener Kommentar mit 120 Zeichen und einer Erwähnung,
+		// Antworten (eingerückt) – eine erwähnt den eigenen Namen –, und weitere Kommentare.
+		ReelsComment second = backend.feed().get(0).comments.get(1);
+		ReelsComment mineLong = reels.comment(top.id, host.name, "kurz", NOON - 450);
+		String longText = "@Rotkaeppchen_201 das ist der längste Kommentar, den dieses Feld erlaubt, mit vielen Wörtern und einem";
+		while (longText.length() < ReelsComment.MAX_TEXT) longText = longText + (longText.endsWith("einem") ? " " : "x");
+		assertEquals(ReelsComment.MAX_TEXT, longText.length());
+		assertNotNull(reels.editComment(top.id, mineLong.id, host.name, longText, NOON - 440));
+		ReelsComment theirReply = reels.reply(top.id, second.id, "Rotkaeppchen_201", "@" + host.name + " da war ich noch nie, wo genau?",
+				NOON - 400);
+		reels.reply(top.id, second.id, host.name, "Klar, komm einfach vorbei!", NOON - 350);
+		for (int n = 0; n < 6; n++) {
+			reels.comment(top.id, n % 2 == 0 ? "Robin_Hood_" + n : host.name, "Kommentar Nummer " + n + " in einem langen Faden", NOON - 300 + n);
+		}
+		// Eine Erwähnung unter dem zweiten Post, die niemand ansieht: die Marke am Kommentar-Symbol.
+		backend.comment(old.id, "Rotkaeppchen_201", "@" + host.name + " schau!", NOON - 50);
+		host.online = new ArrayList<String>(java.util.Arrays.asList("Robin_der_Erste1", "Rosalinde_Rot_16", "Rotkaeppchen_201"));
+		host.friends = new ArrayList<String>(java.util.Arrays.asList("Romeo_und_Julia1"));
 		int[][] windows = {{1920, 1080}, {1280, 720}, {854, 480}, {2560, 1080}, {3840, 2160}, {1024, 768}, {1280, 1024},
 				{800, 1000}, {640, 480}, {320, 240}};
 		for (String lang : LANGUAGES) {
@@ -707,10 +726,54 @@ class PhoneUiTest {
 					assertEquals(PhoneUi.View.COMMENTS, ui.testView(), tag);
 					for (char ch : "Ein Kommentar, der länger ist als das Eingabefeld breit".toCharArray()) ui.inputChar(ch);
 					onScreen(frame(ui), ui, tag + " Kommentare");
+					// Die Schreibmarke mitten im Text, die Liste weiter oben und ganz oben.
+					ui.keyPressed(0, UiKey.HOME, false);
+					for (int i = 0; i < 9; i++) ui.keyPressed(0, UiKey.RIGHT, false);
+					ui.mouseScrolled(0, 0, 1);
+					ui.mouseScrolled(0, 0, 1);
+					onScreen(frame(ui), ui, tag + " Kommentare, geblättert");
+					for (int i = 0; i < 20; i++) ui.mouseScrolled(0, 0, 1);
+					onScreen(frame(ui), ui, tag + " Kommentare, ganz oben");
+					ui.keyPressed(0, UiKey.ESCAPE, false);
+					assertEquals(PhoneUi.View.FEED, ui.testView(), tag);
+					// Antworten: die Leiste, „@Name “ im Feld, dann ein getippter Namensanfang mit Vorschlägen und Hinweis.
+					ui.keyPressed(0, UiKey.ENTER, false);
+					ui.startReply(theirReply.id);
+					assertEquals("REPLY", ui.testCommentMode(), tag);
+					assertEquals("@Rotkaeppchen_201 ", ui.testCommentText(), tag);
+					onScreen(frame(ui), ui, tag + " Antworten");
+					for (char ch : "und @Ro".toCharArray()) ui.inputChar(ch);
+					assertEquals(5, ui.testSuggestions().size(), tag + ": " + ui.testSuggestions());
+					onScreen(frame(ui), ui, tag + " Antworten mit Namen");
+					for (int i = 0; i < 4; i++) ui.keyPressed(0, UiKey.DOWN, false);
+					onScreen(frame(ui), ui, tag + " Antworten, letzter Name markiert");
+					ui.keyPressed(0, UiKey.TAB, false);
+					assertTrue(ui.testSuggestions().isEmpty(), tag);
+					assertTrue(ui.commentNote(), tag);
+					onScreen(frame(ui), ui, tag + " Antworten mit Erwähnung");
+					ui.keyPressed(0, UiKey.ESCAPE, false);
+					assertEquals(PhoneUi.View.COMMENTS, ui.testView(), tag + ": Esc verlässt erst den Modus");
+					// Bearbeiten: der lange eigene Kommentar steht im Feld und ist in der Liste markiert.
+					ui.startEdit(mineLong.id);
+					assertEquals("EDIT", ui.testCommentMode(), tag);
+					assertEquals(longText, ui.testCommentText(), tag);
+					onScreen(frame(ui), ui, tag + " Bearbeiten");
+					ui.keyPressed(0, UiKey.HOME, false);
+					onScreen(frame(ui), ui, tag + " Bearbeiten, Schreibmarke am Anfang");
+					ui.keyPressed(0, UiKey.ESCAPE, false);
+					assertEquals("NEW", ui.testCommentMode(), tag);
 					ui.keyPressed(0, UiKey.ESCAPE, false);
 					ui.mouseScrolled(0, 0, -1);
 					assertEquals(1, ui.testPage(), tag);
 					onScreen(frame(ui), ui, tag + " Seite 2");
+					assertNotNull(ui.testSpot("pingBadge"), tag + ": die Marke am Kommentar-Symbol");
+					// Die Meldungen zu Erwähnungen und Antworten, mit dem längsten Namen.
+					ui.toast(I18n.tr("reels.toast.ping", "Rotkaeppchen_201"));
+					onScreen(frame(ui), ui, tag + " Meldung Erwähnung");
+					ui.toast(I18n.tr("reels.toast.reply", "Rotkaeppchen_201"));
+					onScreen(frame(ui), ui, tag + " Meldung Antwort");
+					ui.toast(I18n.tr("reels.toast.pings", 12));
+					onScreen(frame(ui), ui, tag + " Meldung mehrere");
 					// Die Blätter „Bild“ und „Feed“, eine der neuen Meldungen, und der Feed, wenn der Filter nichts zeigt.
 					ui.openSheet(PhoneUi.Sheet.SAVE);
 					assertEquals(PhoneUi.Sheet.SAVE, ui.testSheet(), tag);
@@ -4476,5 +4539,1426 @@ class PhoneUiTest {
 		PhoneUi ui2 = feed(PhoneHold.LANDSCAPE);
 		ui2.dispose();
 		assertFalse(Files.exists(empty.resolve("feed.json")));
+	}
+
+	// --- D: Kommentare – bearbeiten, antworten, erwähnen, Ping ---
+
+	/** Handy mit offenem Kommentar-Blatt des Posts im Bild; ein Bild ist gezeichnet. */
+	private PhoneUi comments(PhoneHold hold) {
+		PhoneUi ui = feed(hold);
+		assertTrue(ui.keyPressed(0, UiKey.ENTER, false));
+		assertEquals(PhoneUi.View.COMMENTS, ui.testView());
+		frame(ui);
+		return ui;
+	}
+
+	private void type(PhoneUi ui, String text) {
+		for (char ch : text.toCharArray()) assertTrue(ui.inputChar(ch), "Zeichen " + ch);
+	}
+
+	private void keys(PhoneUi ui, UiKey key, int times) {
+		for (int i = 0; i < times; i++) assertTrue(ui.keyPressed(0, key, false), key.toString());
+	}
+
+	private static int count(RecCanvas c, String text) {
+		int n = 0;
+		for (RecCanvas.Text t : c.texts) if (t.text.equals(text)) n++;
+		return n;
+	}
+
+	/** Die Fläche in dieser Farbe, die genau dieses Rechteck füllt – oder null. */
+	private static RecCanvas.Fill fillOf(RecCanvas c, int argb, int x1, int y1, int x2, int y2) {
+		for (RecCanvas.Fill f : c.fills) {
+			if (f.argb == argb && Math.abs(f.x1 - x1) < 0.01 && Math.abs(f.y1 - y1) < 0.01 && Math.abs(f.x2 - x2) < 0.01
+					&& Math.abs(f.y2 - y2) < 0.01) {
+				return f;
+			}
+		}
+		return null;
+	}
+
+	/** Die Texte, die auf dem Kommentar-Blatt stehen (nach dem Blatt gezeichnet) – ohne das, was darunter liegt. */
+	private List<RecCanvas.Text> sheetTexts(RecCanvas c, PhoneUi ui) {
+		int[] sheet = spot(ui, "commentSheet");
+		List<RecCanvas.Text> out = new ArrayList<RecCanvas.Text>();
+		boolean on = false;
+		for (Object o : c.order) {
+			if (o instanceof RecCanvas.Fill) {
+				RecCanvas.Fill f = (RecCanvas.Fill) o;
+				if (f.argb == FeedView.BAR && Math.abs(f.x1 - sheet[0]) < 0.01 && Math.abs(f.y1 - sheet[1]) < 0.01
+						&& Math.abs(f.x2 - sheet[0] - sheet[2]) < 0.01) {
+					on = true;
+				}
+			} else if (on && o instanceof RecCanvas.Text) {
+				out.add((RecCanvas.Text) o);
+			}
+		}
+		assertTrue(on, "das Blatt wurde nicht gezeichnet");
+		return out;
+	}
+
+	/** Backend, dessen Feed sich von außen austauschen lässt – so „verschwindet“ ein Kommentar oder ein Post. */
+	private static final class Swap implements ReelsBackend {
+		final LocalReelsBackend real;
+		/** Ersatz für den Feed (null: der echte). */
+		List<ReelsPost> feed;
+
+		Swap(LocalReelsBackend real) {
+			this.real = real;
+		}
+
+		@Override public List<ReelsPost> feed() { return feed != null ? feed : real.feed(); }
+		@Override public ReelsPost post(String f, int w, int h, boolean p, boolean s, String c, String a, long n) { return real.post(f, w, h, p, s, c, a, n); }
+		@Override public boolean toggleLike(String id) { return real.toggleLike(id); }
+		@Override public ReelsComment comment(String id, String a, String t, long n) { return real.comment(id, a, t, n); }
+		@Override public ReelsComment reply(String id, String parent, String a, String t, long n) { return real.reply(id, parent, a, t, n); }
+		@Override public ReelsComment editComment(String id, String comment, String a, String t, long n) { return real.editComment(id, comment, a, t, n); }
+		@Override public int markPingsSeen(String id, String self) { return real.markPingsSeen(id, self); }
+		@Override public int streak(long n) { return real.streak(n); }
+		@Override public int streakAfterPost(long n) { return real.streakAfterPost(n); }
+		@Override public StreakGuard streakGuard(long n) { return real.streakGuard(n); }
+		@Override public Path photoFile(ReelsPost p) { return real.photoFile(p); }
+		@Override public Path newPhotoFile(String id) { return real.newPhotoFile(id); }
+		@Override public void flush() throws IOException { real.flush(); }
+	}
+
+	@Test
+	void everyCommentHasAReplyLinkAndOnlyOwnOnesAnEditLink() {
+		ReelsPost p = post("Schaut mal!", host.name, 2, false);
+		reels.comment(p.id, "Steve_Baut", "Stark!", NOON - 3000);
+		reels.comment(p.id, host.name, "Danke", NOON - 2000);
+		reels.comment(p.id, "Rotkaeppchen", "Wo ist das?", NOON - 1000);
+		for (PhoneHold hold : PhoneHold.values()) {
+			PhoneUi ui = comments(hold);
+			RecCanvas c = frame(ui);
+			String tag = hold.toString();
+			assertEquals(3, ui.commentsShown, tag);
+			int[] sheet = spot(ui, "commentSheet");
+			for (int i = 0; i < 3; i++) {
+				assertTrue(inside(spot(ui, "commentRow" + i), sheet), tag + " Zeile " + i);
+				assertTrue(inside(spot(ui, "commentReply" + i), sheet), tag + " Antworten " + i);
+			}
+			assertNull(ui.testSpot("commentEdit0"), tag + ": fremd");
+			assertTrue(inside(spot(ui, "commentEdit1"), sheet), tag + ": eigen");
+			assertNull(ui.testSpot("commentEdit2"), tag + ": fremd");
+			// Die beiden Wörter stehen blass unter dem Kommentar.
+			assertEquals(3, count(c, I18n.tr("reels.comment.reply")), tag + ": " + c.strings());
+			assertEquals(1, count(c, I18n.tr("reels.comment.edit")), tag);
+			RecCanvas.Text reply = textOf(c, I18n.tr("reels.comment.reply"));
+			RecCanvas.Text edit = textOf(c, I18n.tr("reels.comment.edit"));
+			assertEquals(FeedView.BAR_OFF, reply.argb, tag);
+			assertEquals(FeedView.BAR_OFF, edit.argb, tag);
+			// „Bearbeiten“ steht in derselben Zeile rechts daneben; seine Klickfläche beginnt, wo die von „Antworten“ endet.
+			int[] r = spot(ui, "commentReply1"), e = spot(ui, "commentEdit1");
+			assertEquals(r[0] + r[2], e[0], tag);
+			assertEquals(r[1], e[1], tag);
+			assertEquals(r[3], e[3], tag);
+			int[] row = spot(ui, "commentRow1");
+			assertEquals(edit.y, row[1] + row[3] - edit.h, 0.01, tag + ": die Link-Zeile ist die letzte Zeile des Kommentars");
+			assertTrue(edit.x >= r[0] + r[2] && edit.x + edit.w <= e[0] + e[2], tag);
+			// Die Reihenfolge: der älteste oben, der neueste direkt über dem Feld.
+			assertTrue(spot(ui, "commentRow0")[1] < spot(ui, "commentRow1")[1] && spot(ui, "commentRow1")[1] < spot(ui, "commentRow2")[1], tag);
+			ui.dispose();
+		}
+	}
+
+	@Test
+	void linkHitAreasAreAtLeastFortyPixelsAndNeverOverlap() {
+		ReelsPost p = post("Schaut mal!", host.name, 2, false);
+		ReelsComment first = reels.comment(p.id, host.name, "Der Panda wohnt jetzt bei mir.", NOON - 9000);
+		reels.reply(p.id, first.id, "Steve_Baut", "Stark!", NOON - 8000);
+		reels.reply(p.id, first.id, host.name, "Danke dir", NOON - 7000);
+		reels.comment(p.id, "Rotkaeppchen", "Wo ist das?", NOON - 6000);
+		reels.comment(p.id, host.name, "Im Bambuswald", NOON - 5000);
+		reels.comment(p.id, host.name, "Kommt vorbei", NOON - 4000);
+		int[][] windows = {{1920, 1080}, {1280, 720}, {854, 480}, {2560, 1080}, {3840, 2160}, {1024, 768}, {1280, 1024},
+				{800, 1000}, {640, 480}, {320, 240}};
+		for (int[] win : windows) {
+			for (PhoneHold hold : PhoneHold.values()) {
+				host.size(win[0], win[1], 2);
+				String tag = hold + " " + win[0] + "x" + win[1];
+				PhoneUi ui = comments(hold);
+				List<int[]> hits = new ArrayList<int[]>();
+				List<String> names = new ArrayList<String>();
+				for (int i = 0; i < 6; i++) {
+					for (String kind : new String[]{"commentReply", "commentEdit"}) {
+						int[] r = ui.testSpot(kind + i);
+						if (r == null) continue;
+						hits.add(r);
+						names.add(kind + i);
+					}
+				}
+				int[] sheet = spot(ui, "commentSheet");
+				int[] input = spot(ui, "commentInput");
+				for (int a = 0; a < hits.size(); a++) {
+					assertTrue(inside(hits.get(a), sheet), tag + ": " + names.get(a) + " liegt im Blatt");
+					assertFalse(overlap(hits.get(a), input), tag + ": " + names.get(a) + " berührt das Feld");
+					for (int b = a + 1; b < hits.size(); b++) {
+						assertFalse(overlap(hits.get(a), hits.get(b)), tag + ": " + names.get(a) + " und " + names.get(b) + " überlappen");
+					}
+				}
+				if (win[0] == 1920) {
+					assertTrue(ui.commentsShown >= 5, tag + ": " + ui.commentsShown);
+					assertTrue(hits.size() >= 8, tag + ": " + names);
+					// Letzte Textzeile, Link-Zeile und je ein halber Abstand: 44 px quer, 42 px hochkant.
+					for (int a = 0; a < hits.size(); a++) {
+						assertEquals(hold == PhoneHold.LANDSCAPE ? 44 : 42, hits.get(a)[3], tag + ": " + names.get(a));
+						assertTrue(hits.get(a)[2] >= 40, tag + ": " + names.get(a) + " ist " + hits.get(a)[2] + " breit");
+					}
+				}
+				ui.dispose();
+			}
+		}
+		host.size(1920, 1080, 2);
+	}
+
+	@Test
+	void editFillsTheFieldAndEnterStoresAndMarksIt() {
+		ReelsPost p = post("Schaut mal!", host.name, 2, false);
+		ReelsComment mine = reels.comment(p.id, host.name, "Der Pnada wohnt hier", NOON - 2000);
+		PhoneUi ui = comments(PhoneHold.LANDSCAPE);
+		click(ui, "commentEdit0");
+		assertEquals("EDIT", ui.testCommentMode());
+		assertEquals("Der Pnada wohnt hier", ui.testCommentText());
+		assertEquals(20, ui.testCommentCaret(), "die Schreibmarke steht am Ende");
+		RecCanvas c = frame(ui);
+		assertTrue(c.shows(I18n.tr("reels.comment.editing")), c.strings().toString());
+		assertEquals(FeedView.TEXT_SOFT, textOf(c, I18n.tr("reels.comment.editing")).argb);
+		// Leiste direkt über dem Feld, mit gelbem Balken links.
+		int[] banner = spot(ui, "commentBanner"), input = spot(ui, "commentInput");
+		assertArrayEquals(new int[]{18, 397, 1012, 40}, onPhone(ui, "commentBanner"));
+		assertEquals(input[1], banner[1] + banner[3] + 10);
+		assertNotNull(fillOf(c, FeedView.AMBER, banner[0], banner[1], banner[0] + 4, banner[1] + banner[3]), "gelber Balken");
+
+		// Leerer Text wird abgelehnt: nichts passiert.
+		keys(ui, UiKey.BACKSPACE, 20);
+		assertEquals("", ui.testCommentText());
+		keys(ui, UiKey.ENTER, 1);
+		assertEquals("EDIT", ui.testCommentMode());
+		assertEquals("Der Pnada wohnt hier", backend.feed().get(0).comments.get(0).text);
+		assertNull(backend.feed().get(0).comments.get(0).editedAt);
+
+		type(ui, "Der Panda wohnt hier");
+		ui.testNow = NOON + 60000;
+		keys(ui, UiKey.ENTER, 1);
+		assertEquals(1, backend.feed().get(0).comments.size(), "kein neuer Kommentar");
+		ReelsComment now = backend.feed().get(0).comments.get(0);
+		assertEquals(mine.id, now.id);
+		assertEquals("Der Panda wohnt hier", now.text);
+		assertEquals(Long.valueOf(NOON + 60000), now.editedAt);
+		assertEquals(NOON - 2000, now.at, "die Zeit des Kommentars bleibt");
+		assertEquals("NEW", ui.testCommentMode());
+		assertEquals("", ui.testCommentText());
+		c = frame(ui);
+		assertNull(ui.testSpot("commentBanner"));
+		assertNull(ui.testSpot("commentTarget"));
+		RecCanvas.Text edited = textOf(c, " " + I18n.tr("reels.comment.edited"));
+		assertNotNull(edited, "„(bearbeitet)“ steht hinter dem Text: " + c.strings());
+		assertEquals(FeedView.TEXT_DIM, edited.argb);
+		RecCanvas.Text text = textOf(c, "Der Panda wohnt hier");
+		assertEquals(text.x + text.w, edited.x, 0.01, "direkt dahinter, in derselben Zeile");
+		assertEquals(text.y, edited.y, 0.01);
+
+		// Unveränderter Text: zurück zu „neu“, nichts wird (neu) als bearbeitet gemerkt.
+		reels.comment(p.id, host.name, "Zweiter", NOON - 1000);
+		frame(ui);
+		click(ui, "commentEdit1");
+		assertEquals("Zweiter", ui.testCommentText());
+		type(ui, "  ");
+		ui.testNow = NOON + 120000;
+		keys(ui, UiKey.ENTER, 1);
+		assertEquals("NEW", ui.testCommentMode());
+		assertEquals("", ui.testCommentText());
+		assertEquals("Zweiter", backend.feed().get(0).comments.get(1).text);
+		assertNull(backend.feed().get(0).comments.get(1).editedAt);
+		assertEquals(2, backend.feed().get(0).comments.size());
+		ui.dispose();
+	}
+
+	@Test
+	void caretMovesInTheCommentFieldAndTheFieldFollowsIt() {
+		post("Schaut mal!", host.name, 2, false);
+		String text = chars(80);
+		for (PhoneHold hold : PhoneHold.values()) {
+			// Das Feld zeigt quer 54 Zeichen, hochkant 27.
+			int fits = hold == PhoneHold.LANDSCAPE ? 54 : 27;
+			String tag = hold.toString();
+			PhoneUi ui = comments(hold);
+			type(ui, text);
+			assertEquals(80, ui.testCommentCaret(), tag);
+			RecCanvas c = frame(ui);
+			RecCanvas.Text shown = textOf(c, text.substring(80 - fits));
+			assertNotNull(shown, tag + ": das Feld zeigt den Schluss: " + c.strings());
+			int[] field = spot(ui, "commentInput");
+			assertTrue(shown.x >= field[0] && shown.x + shown.w <= field[0] + field[2], tag);
+			// Am Ende: der Block hinter dem Text, eine Schrift-Pixel-Breite Abstand.
+			int[] caret = spot(ui, "commentCaret");
+			assertEquals(shown.x + shown.w + shown.scale, caret[0], 0.01, tag);
+			assertEquals(2 * shown.scale, caret[2], 0.01, tag);
+			assertTrue(inside(caret, field), tag);
+
+			// Drei nach links: derselbe Ausschnitt, die Schreibmarke ist ein Strich zwischen zwei Zeichen.
+			keys(ui, UiKey.LEFT, 3);
+			assertEquals(77, ui.testCommentCaret(), tag);
+			c = frame(ui);
+			shown = textOf(c, text.substring(80 - fits));
+			assertNotNull(shown, tag);
+			caret = spot(ui, "commentCaret");
+			assertEquals(shown.x + (fits - 3) * 6 * shown.scale, caret[0] + caret[2], 0.01, tag + ": genau vor dem drittletzten Zeichen");
+			assertEquals(shown.scale, caret[2], 0.01, tag);
+
+			// Pos1: das Feld zeigt den Anfang.
+			keys(ui, UiKey.HOME, 1);
+			assertEquals(0, ui.testCommentCaret(), tag);
+			c = frame(ui);
+			shown = textOf(c, text.substring(0, fits));
+			assertNotNull(shown, tag + ": " + c.strings());
+			caret = spot(ui, "commentCaret");
+			assertEquals(shown.x, caret[0] + caret[2], 0.01, tag);
+			assertTrue(inside(caret, field), tag);
+
+			// Nach rechts über den Rand hinaus: das Feld folgt, die Schreibmarke bleibt sichtbar.
+			keys(ui, UiKey.RIGHT, fits + 6);
+			assertEquals(fits + 6, ui.testCommentCaret(), tag);
+			c = frame(ui);
+			shown = textOf(c, text.substring(6, fits + 6));
+			assertNotNull(shown, tag + ": " + c.strings());
+			caret = spot(ui, "commentCaret");
+			assertEquals(shown.x + shown.w, caret[0] + caret[2], 0.01, tag);
+			assertTrue(inside(caret, field), tag);
+
+			// Ende: wieder der Schluss.
+			keys(ui, UiKey.END, 1);
+			assertEquals(80, ui.testCommentCaret(), tag);
+			assertNotNull(textOf(frame(ui), text.substring(80 - fits)), tag);
+			// Ein Klick auf das Feld, das den Fokus schon hat, lässt die Schreibmarke, wo sie ist.
+			keys(ui, UiKey.LEFT, 10);
+			click(ui, "commentInput");
+			assertEquals(70, ui.testCommentCaret(), tag);
+			ui.dispose();
+		}
+	}
+
+	@Test
+	void typoAtTheStartIsFixedWithoutRetyping() {
+		ReelsPost p = post("Schaut mal!", host.name, 2, false);
+		PhoneUi ui = comments(PhoneHold.PORTRAIT);
+		type(ui, "Xier ist es schön");
+		keys(ui, UiKey.HOME, 1);
+		keys(ui, UiKey.DELETE, 1);
+		type(ui, "H");
+		assertEquals("Hier ist es schön", ui.testCommentText());
+		assertEquals(1, ui.testCommentCaret());
+		keys(ui, UiKey.ENTER, 1);
+		List<ReelsComment> list = backend.feed().get(0).comments;
+		assertEquals(1, list.size());
+		assertEquals("Hier ist es schön", list.get(0).text);
+		assertEquals(p.id, backend.feed().get(0).id);
+		// Rücktaste löscht vor der Schreibmarke, Entf dahinter – auch mitten im Text.
+		type(ui, "abcdef");
+		keys(ui, UiKey.LEFT, 3);
+		keys(ui, UiKey.BACKSPACE, 1);
+		assertEquals("abdef", ui.testCommentText());
+		keys(ui, UiKey.DELETE, 1);
+		assertEquals("abef", ui.testCommentText());
+		assertEquals(2, ui.testCommentCaret());
+		// Am Anfang bzw. Ende tun sie nichts.
+		keys(ui, UiKey.HOME, 1);
+		keys(ui, UiKey.BACKSPACE, 1);
+		keys(ui, UiKey.END, 1);
+		keys(ui, UiKey.DELETE, 1);
+		assertEquals("abef", ui.testCommentText());
+		ui.dispose();
+	}
+
+	@Test
+	void pasteGoesInAtTheCaret() {
+		post("Schaut mal!", host.name, 2, false);
+		PhoneUi ui = comments(PhoneHold.LANDSCAPE);
+		type(ui, "Hallo Welt");
+		keys(ui, UiKey.LEFT, 4);
+		host.clipboard = "schöne\n";
+		keys(ui, UiKey.PASTE, 1);
+		assertEquals("Hallo schöne Welt", ui.testCommentText());
+		assertEquals(13, ui.testCommentCaret(), "die Schreibmarke steht hinter dem Eingefügten");
+		type(ui, "neue ");
+		assertEquals("Hallo schöne neue Welt", ui.testCommentText());
+		// An der Längengrenze kommt ein Zeichenpaar ganz oder gar nicht – auch mitten im Text.
+		keys(ui, UiKey.END, 1);
+		type(ui, chars(ReelsComment.MAX_TEXT - 22 - 1));
+		assertEquals(ReelsComment.MAX_TEXT - 1, ui.testCommentText().length());
+		keys(ui, UiKey.HOME, 1);
+		keys(ui, UiKey.RIGHT, 5);
+		host.clipboard = "😀";
+		keys(ui, UiKey.PASTE, 1);
+		assertEquals(ReelsComment.MAX_TEXT - 1, ui.testCommentText().length(), "kein halbes Paar");
+		assertEquals(5, ui.testCommentCaret());
+		// Getippt genauso: die erste Hälfte allein kommt nicht ins Feld.
+		type(ui, "😀");
+		assertEquals(ReelsComment.MAX_TEXT - 1, ui.testCommentText().length());
+		for (int i = 0; i < ui.testCommentText().length(); i++) assertFalse(Character.isSurrogate(ui.testCommentText().charAt(i)));
+		frame(ui);
+		ui.dispose();
+	}
+
+	@Test
+	void caretKeysNeverSplitAPair() {
+		post("Schaut mal!", host.name, 2, false);
+		String pair = "😀";
+		PhoneUi ui = comments(PhoneHold.LANDSCAPE);
+		host.clipboard = "a" + pair + "b";
+		keys(ui, UiKey.PASTE, 1);
+		assertEquals("a" + pair + "b", ui.testCommentText());
+		assertEquals(4, ui.testCommentCaret());
+		keys(ui, UiKey.LEFT, 1);
+		assertEquals(3, ui.testCommentCaret());
+		keys(ui, UiKey.LEFT, 1);
+		assertEquals(1, ui.testCommentCaret(), "über das Paar als Ganzes");
+		frame(ui);
+		keys(ui, UiKey.RIGHT, 1);
+		assertEquals(3, ui.testCommentCaret());
+		// Rücktaste hinter dem Paar: es geht ganz weg.
+		keys(ui, UiKey.BACKSPACE, 1);
+		assertEquals("ab", ui.testCommentText());
+		assertEquals(1, ui.testCommentCaret());
+		// Entf vor dem Paar auch.
+		host.clipboard = pair;
+		keys(ui, UiKey.PASTE, 1);
+		assertEquals("a" + pair + "b", ui.testCommentText());
+		assertEquals(3, ui.testCommentCaret());
+		keys(ui, UiKey.LEFT, 1);
+		keys(ui, UiKey.DELETE, 1);
+		assertEquals("ab", ui.testCommentText());
+		assertEquals(1, ui.testCommentCaret());
+		// Getippt (zwei Hälften nacheinander) landet das Paar an der Schreibmarke – und zählt danach als eines.
+		type(ui, pair);
+		assertEquals("a" + pair + "b", ui.testCommentText());
+		keys(ui, UiKey.HOME, 1);
+		keys(ui, UiKey.RIGHT, 2);
+		assertEquals(3, ui.testCommentCaret());
+		keys(ui, UiKey.END, 1);
+		keys(ui, UiKey.LEFT, 2);
+		assertEquals(1, ui.testCommentCaret());
+		// Ein langes Feld voller Paare: der gezeigte Ausschnitt beginnt und endet nie mitten in einem.
+		keys(ui, UiKey.END, 1);
+		StringBuilder many = new StringBuilder();
+		for (int i = 0; i < 40; i++) many.append(pair);
+		host.clipboard = many.toString();
+		keys(ui, UiKey.PASTE, 1);
+		for (int step = 0; step < 45; step++) {
+			RecCanvas c = frame(ui);
+			for (RecCanvas.Text t : c.texts) {
+				assertFalse(Character.isLowSurrogate(t.text.charAt(0)), "beginnt mit einer Hälfte: " + t);
+				assertFalse(Character.isHighSurrogate(t.text.charAt(t.text.length() - 1)), "endet mit einer Hälfte: " + t);
+			}
+			int at = ui.testCommentCaret();
+			String s = ui.testCommentText();
+			assertFalse(at > 0 && at < s.length() && Character.isLowSurrogate(s.charAt(at)), "Schreibmarke mitten im Paar bei " + at);
+			keys(ui, UiKey.LEFT, 1);
+		}
+		ui.dispose();
+	}
+
+	@Test
+	void theEditedCommentIsHighlightedAndVisible() {
+		ReelsPost p = post("Schaut mal!", host.name, 2, false);
+		ReelsComment mine = reels.comment(p.id, host.name, "Mein Text eins", NOON - 20000);
+		for (int n = 0; n < 9; n++) reels.comment(p.id, "Gast" + n, "Kommentar " + n, NOON - 10000 + n);
+		ReelsComment answer = reels.reply(p.id, mine.id, host.name, "Meine Antwort", NOON - 500);
+		for (PhoneHold hold : PhoneHold.values()) {
+			String tag = hold.toString();
+			PhoneUi ui = comments(hold);
+			assertNull(ui.testSpot("commentRow0"), tag + ": der älteste ist anfangs nicht zu sehen");
+			// Hinblättern und „Bearbeiten“ klicken.
+			for (int i = 0; i < 12 && ui.testSpot("commentEdit0") == null; i++) {
+				ui.inputScroll(0, 0, 1);
+				frame(ui);
+			}
+			click(ui, "commentEdit0");
+			RecCanvas c = frame(ui);
+			assertEquals("EDIT", ui.testCommentMode(), tag);
+			int[] target = spot(ui, "commentTarget");
+			assertArrayEquals(spot(ui, "commentRow0"), target, tag);
+			// Die unterste gezeichnete Zeile, ganz über der Leiste – der alte Text bleibt lesbar.
+			int[] banner = spot(ui, "commentBanner");
+			assertTrue(target[1] + target[3] <= banner[1], tag);
+			assertNull(ui.testSpot("commentRow1"), tag + ": darunter steht nichts mehr");
+			assertEquals(1, ui.commentsShown, tag);
+			assertEquals(2, count(c, "Mein Text eins"), tag + ": in der Liste und im Feld: " + c.strings());
+			// Gelber Balken links neben dem Text, so hoch wie der Kommentar, im Rand des Blatts.
+			int left = hold == PhoneHold.LANDSCAPE ? 10 : 8;
+			RecCanvas.Fill bar = fillOf(c, FeedView.AMBER, target[0] - left, target[1], target[0] - left + (hold == PhoneHold.LANDSCAPE ? 4 : 3),
+					target[1] + target[3]);
+			assertNotNull(bar, tag + ": gelber Balken");
+			assertTrue(bar.x1 >= spot(ui, "commentSheet")[0], tag);
+			keys(ui, UiKey.ESCAPE, 1);
+			c = frame(ui);
+			assertNull(ui.testSpot("commentTarget"), tag);
+
+			// Eine eigene Antwort: ihr Balken (sonst grau) wird gelb.
+			int rows = backend.feed().get(0).comments.size();
+			assertEquals(answer.id, backend.feed().get(0).comments.get(rows - 1).id);
+			// Die Liste steht noch beim ältesten Kommentar; eine Raste weiter unten kommt seine Antwort dazu.
+			ui.inputScroll(0, 0, -1);
+			frame(ui);
+			assertNotNull(ui.testSpot("commentEdit1"), tag + ": die Antwort steht direkt unter ihrem Kommentar");
+			click(ui, "commentEdit1");
+			c = frame(ui);
+			assertEquals("Meine Antwort", ui.testCommentText(), tag);
+			target = spot(ui, "commentTarget");
+			assertArrayEquals(spot(ui, "commentRow1"), target, tag);
+			int indent = hold == PhoneHold.LANDSCAPE ? 23 : 17;
+			assertNotNull(fillOf(c, FeedView.AMBER, target[0] - indent, target[1], target[0] - indent + (hold == PhoneHold.LANDSCAPE ? 4 : 3),
+					target[1] + target[3]), tag + ": der Balken der Antwort ist gelb");
+			assertNotNull(ui.testSpot("commentRow0"), tag + ": der Kommentar darüber bleibt zu sehen");
+			ui.dispose();
+		}
+	}
+
+	@Test
+	void replyShowsTheBarAndTheReplyIsIndentedUnderItsParent() {
+		ReelsPost p = post("Schaut mal!", host.name, 2, false);
+		ReelsComment first = reels.comment(p.id, "Steve_Baut", "Stark!", NOON - 3000);
+		reels.comment(p.id, "Rotkaeppchen", "Wie süß!", NOON - 2000);
+		for (PhoneHold hold : PhoneHold.values()) {
+			String tag = hold.toString();
+			boolean land = hold == PhoneHold.LANDSCAPE;
+			PhoneUi ui = comments(hold);
+			int before = backend.feed().get(0).comments.size();
+			click(ui, "commentReply0");
+			assertEquals("REPLY", ui.testCommentMode(), tag);
+			assertEquals("", ui.testCommentText(), tag + ": Antwort auf die oberste Ebene – nichts vorausgefüllt");
+			RecCanvas c = frame(ui);
+			assertTrue(c.shows(I18n.tr("reels.comment.replyTo", "Steve_Baut")), tag + ": " + c.strings());
+			assertTrue(c.shows(I18n.tr("reels.comment.hint.reply")), tag + ": der Hinweis im Feld");
+			assertFalse(c.shows(I18n.tr("reels.comment.hint")), tag);
+			assertArrayEquals(land ? new int[]{18, 397, 1012, 40} : new int[]{13, 713, 358, 40}, onPhone(ui, "commentBanner"), tag);
+			// Das Kreuz: ein Quadrat so hoch wie die Leiste, an ihrem rechten Ende.
+			int[] banner = spot(ui, "commentBanner"), cancel = spot(ui, "commentCancel");
+			assertArrayEquals(new int[]{banner[0] + banner[2] - 40, banner[1], 40, 40}, cancel, tag);
+			assertArrayEquals(spot(ui, "commentRow0"), spot(ui, "commentTarget"), tag);
+
+			type(ui, "Danke dir");
+			ui.testNow = NOON + 1000 * (land ? 1 : 2);
+			keys(ui, UiKey.ENTER, 1);
+			assertEquals("NEW", ui.testCommentMode(), tag);
+			assertEquals("", ui.testCommentText(), tag);
+			List<ReelsComment> list = backend.feed().get(0).comments;
+			assertEquals(before + 1, list.size(), tag);
+			ReelsComment sent = list.get(list.size() - 1);
+			assertEquals(first.id, sent.replyTo, tag);
+			assertEquals(host.name, sent.author, tag);
+			assertEquals("Danke dir", sent.text, tag);
+			assertNotNull(sent.id, tag);
+
+			// In der Liste: direkt unter ihrem Kommentar, vor dem jüngeren Kommentar der obersten Ebene – eingerückt, mit Balken.
+			c = frame(ui);
+			assertNull(ui.testSpot("commentBanner"), tag);
+			int last = list.size() - 1;
+			int[] parent = spot(ui, "commentRow0"), reply = spot(ui, "commentRow" + (last - 1)), other = spot(ui, "commentRow" + last);
+			assertEquals(parent[0] + (land ? 23 : 17), reply[0], tag + ": eingerückt");
+			assertEquals(parent[2] - (land ? 23 : 17), reply[2], tag);
+			assertEquals(parent[0], other[0], tag);
+			assertTrue(parent[1] < reply[1] && reply[1] < other[1], tag);
+			RecCanvas.Text text = textOf(c, "Danke dir");
+			assertNotNull(text, tag);
+			assertEquals(reply[0] + text.scale * 6 * (host.name.length() + 2), text.x, 0.01, tag + ": hinter dem Namen");
+			assertNotNull(fillOf(c, FeedView.BAR_LINE, parent[0], reply[1], parent[0] + (land ? 4 : 3), reply[1] + reply[3]),
+					tag + ": schmaler Balken links, so hoch wie die Antwort");
+			// Die Antwort hat selbst wieder „Antworten“ und – weil eigen – „Bearbeiten“.
+			assertNotNull(ui.testSpot("commentReply" + (last - 1)), tag);
+			assertNotNull(ui.testSpot("commentEdit" + (last - 1)), tag);
+			assertEquals(reply[0] - (land ? 10 : 8), spot(ui, "commentReply" + (last - 1))[0], tag);
+			ui.dispose();
+		}
+	}
+
+	@Test
+	void replyToAReplyPrefillsTheMentionOnlyForAValidPlayerName() {
+		ReelsPost p = post("Schaut mal!", host.name, 2, false);
+		ReelsComment first = reels.comment(p.id, host.name, "Erster", NOON - 5000);
+		reels.reply(p.id, first.id, "Steve_Baut", "Antwort eins", NOON - 4000);
+		reels.reply(p.id, first.id, "Max Mustermann", "Antwort zwei", NOON - 3000);
+		PhoneUi ui = comments(PhoneHold.LANDSCAPE);
+		// Antwort auf eine Antwort: „@Name “ steht schon im Feld, die Schreibmarke dahinter.
+		click(ui, "commentReply1");
+		assertEquals("REPLY", ui.testCommentMode());
+		assertEquals("@Steve_Baut ", ui.testCommentText());
+		assertEquals(12, ui.testCommentCaret());
+		assertTrue(ui.testSuggestions().isEmpty(), "der Name steht schon ganz da");
+		RecCanvas c = frame(ui);
+		assertTrue(c.shows(I18n.tr("reels.comment.replyTo", "Steve_Baut")), c.strings().toString());
+		assertArrayEquals(spot(ui, "commentRow1"), spot(ui, "commentTarget"), "markiert ist die Antwort, um die es geht");
+		type(ui, "danke");
+		keys(ui, UiKey.ENTER, 1);
+		List<ReelsComment> list = backend.feed().get(0).comments;
+		assertEquals(4, list.size());
+		assertEquals("@Steve_Baut danke", list.get(3).text);
+		assertEquals(first.id, list.get(3).replyTo, "sie hängt am selben Kommentar der obersten Ebene");
+		c = frame(ui);
+		assertEquals(4, ui.commentsShown);
+
+		// Kein gültiger Spielername: das Feld bleibt leer, die Leiste nennt den Namen trotzdem.
+		click(ui, "commentReply2");
+		assertEquals("REPLY", ui.testCommentMode());
+		assertEquals("", ui.testCommentText());
+		c = frame(ui);
+		assertTrue(c.shows(I18n.tr("reels.comment.replyTo", "Max Mustermann")), c.strings().toString());
+		type(ui, "auch dir");
+		keys(ui, UiKey.ENTER, 1);
+		list = backend.feed().get(0).comments;
+		assertEquals(first.id, list.get(4).replyTo);
+		assertEquals("auch dir", list.get(4).text);
+
+		// Die eigene Antwort beantworten: sich selbst erwähnt man nicht.
+		frame(ui);
+		click(ui, "commentReply3");
+		assertEquals("REPLY", ui.testCommentMode());
+		assertEquals("", ui.testCommentText());
+		// Getippter Text bleibt, wenn man danach auf eine andere Antwort wechselt.
+		type(ui, "Moment");
+		frame(ui);
+		click(ui, "commentReply1");
+		assertEquals("Moment", ui.testCommentText());
+		ui.dispose();
+	}
+
+	@Test
+	void escLeavesTheModeFirstAndClosesTheSheetSecond() {
+		ReelsPost p = post("Schaut mal!", host.name, 2, false);
+		reels.comment(p.id, host.name, "Mein Kommentar", NOON - 2000);
+		PhoneUi ui = comments(PhoneHold.PORTRAIT);
+		click(ui, "commentReply0");
+		type(ui, "abc");
+		assertTrue(ui.inputKey(0, UiKey.ESCAPE, false));
+		assertEquals("NEW", ui.testCommentMode());
+		assertEquals(PhoneUi.View.COMMENTS, ui.testView(), "das Blatt bleibt offen");
+		assertEquals("abc", ui.testCommentText(), "der Text einer Antwort bleibt");
+		RecCanvas c = frame(ui);
+		assertNull(ui.testSpot("commentBanner"));
+		assertTrue(ui.inputKey(0, UiKey.ESCAPE, false));
+		assertEquals(PhoneUi.View.FEED, ui.testView());
+		assertFalse(ui.isClosing());
+
+		// Bearbeiten: Esc leert das Feld (der alte Text ist kein Entwurf für einen neuen Kommentar).
+		keys(ui, UiKey.ENTER, 1);
+		assertEquals("", ui.testCommentText(), "ein neu geöffnetes Blatt beginnt leer");
+		frame(ui);
+		click(ui, "commentEdit0");
+		assertEquals("Mein Kommentar", ui.testCommentText());
+		keys(ui, UiKey.ESCAPE, 1);
+		assertEquals("NEW", ui.testCommentMode());
+		assertEquals("", ui.testCommentText());
+		assertEquals(PhoneUi.View.COMMENTS, ui.testView());
+
+		// Das Kreuz der Leiste tut dasselbe wie Esc.
+		frame(ui);
+		click(ui, "commentEdit0");
+		frame(ui);
+		click(ui, "commentCancel");
+		assertEquals("NEW", ui.testCommentMode());
+		assertEquals("", ui.testCommentText());
+		assertEquals(PhoneUi.View.COMMENTS, ui.testView());
+		// Wer von „Bearbeiten“ auf „Antworten“ wechselt, nimmt den alten Text nicht mit.
+		frame(ui);
+		click(ui, "commentEdit0");
+		frame(ui);
+		click(ui, "commentReply0");
+		assertEquals("REPLY", ui.testCommentMode());
+		assertEquals("", ui.testCommentText());
+		// Schließen und wieder öffnen: der Modus ist weg.
+		click(ui, "commentsClose");
+		assertEquals(PhoneUi.View.FEED, ui.testView());
+		keys(ui, UiKey.ENTER, 1);
+		assertEquals("NEW", ui.testCommentMode());
+		assertEquals(1, backend.feed().get(0).comments.size(), "nichts davon hat etwas gesendet");
+		assertNull(backend.feed().get(0).comments.get(0).editedAt);
+		ui.dispose();
+	}
+
+	@Test
+	void editOfAVanishedCommentFallsBackToNew() {
+		ReelsPost p = post("Schaut mal!", host.name, 2, false);
+		reels.comment(p.id, "Steve_Baut", "Stark!", NOON - 3000);
+		ReelsComment mine = reels.comment(p.id, host.name, "Mein Kommentar", NOON - 2000);
+		Swap swap = new Swap(backend);
+		reels = Reels.forTest(modules, swap, DIRECT, UTC);
+		for (int round = 0; round < 3; round++) {
+			swap.feed = null;
+			PhoneUi ui = comments(PhoneHold.LANDSCAPE);
+			if (round == 2) click(ui, "commentReply1");
+			else click(ui, "commentEdit1");
+			type(ui, " neu");
+			String typed = ui.testCommentText();
+			// Der Kommentar verschwindet (von anderswo gelöscht).
+			ReelsPost without = backend.feed().get(0).copy();
+			without.comments.remove(1);
+			swap.feed = java.util.Collections.singletonList(without);
+			// Runde 0: Enter kommt, bevor ein Bild das zeigt. Runde 1 und 2: erst ein Bild, dann Enter.
+			if (round > 0) {
+				RecCanvas c = frame(ui);
+				assertEquals("NEW", ui.testCommentMode(), "Runde " + round);
+				assertNull(ui.testSpot("commentBanner"), "Runde " + round);
+				assertNull(ui.testSpot("commentTarget"), "Runde " + round);
+				assertEquals(1, ui.commentsShown);
+				assertEquals(typed, ui.testCommentText(), "der getippte Text bleibt");
+			} else {
+				keys(ui, UiKey.ENTER, 1);
+				assertEquals("NEW", ui.testCommentMode());
+				assertEquals(typed, ui.testCommentText(), "der getippte Text bleibt, gesendet wird nichts");
+				assertEquals(PhoneUi.View.COMMENTS, ui.testView());
+			}
+			List<ReelsComment> real = backend.feed().get(0).comments;
+			assertEquals(2, real.size(), "Runde " + round);
+			assertEquals("Mein Kommentar", real.get(1).text);
+			assertNull(real.get(1).editedAt);
+			assertEquals(mine.id, real.get(1).id);
+			ui.dispose();
+		}
+	}
+
+	@Test
+	void commentsCloseWhenTheirPostLeavesTheList() {
+		ReelsPost old = post("Älter", host.name, 5, false);
+		ReelsPost top = post("Von jemand anderem", "Steve_Baut", 2, false);
+		reels.comment(top.id, "Rotkaeppchen", "Stark!", NOON - 3000);
+		Swap swap = new Swap(backend);
+		reels = Reels.forTest(modules, swap, DIRECT, UTC);
+		PhoneUi ui = comments(PhoneHold.LANDSCAPE);
+		click(ui, "commentReply0");
+		type(ui, "Antwort");
+		assertEquals("REPLY", ui.testCommentMode());
+		// Der Post verschwindet aus dem Feed: das Blatt gehört zu ihm und schließt sich – nichts hängt am nächsten Post.
+		swap.feed = java.util.Collections.singletonList(backend.feed().get(1));
+		RecCanvas c = frame(ui);
+		assertEquals(PhoneUi.View.FEED, ui.testView());
+		assertEquals("NEW", ui.testCommentMode());
+		assertEquals("", ui.testCommentText());
+		assertEquals(0, ui.testCommentScroll());
+		assertNull(ui.testSpot("commentSheet"));
+		assertTrue(c.shows("Älter"));
+		// Enter öffnet jetzt die Kommentare des anderen Posts – und sendet nichts dorthin.
+		keys(ui, UiKey.ENTER, 1);
+		assertEquals(PhoneUi.View.COMMENTS, ui.testView());
+		assertEquals(0, backend.feed().get(1).comments.size());
+		assertEquals(old.id, backend.feed().get(1).id);
+		ui.dispose();
+
+		// Dasselbe, wenn der Filter den Post aus der Liste nimmt.
+		swap.feed = null;
+		ui = comments(PhoneHold.PORTRAIT);
+		assertEquals(0, ui.testPage());
+		ui.setFilter(FeedFilter.MINE);
+		frame(ui);
+		assertEquals(PhoneUi.View.FEED, ui.testView());
+		assertNull(ui.testSpot("commentSheet"));
+		ui.setFilter(FeedFilter.ALL);
+		ui.dispose();
+	}
+
+	/** Post mit einem Kommentar von Steve_Baut, dazu Namen auf dem „Server“, in der Freundesliste und im Feed. */
+	private ReelsPost namesEverywhere() {
+		post("Älter", "Stonecutter7", 30, false);
+		ReelsPost p = post("Schaut mal!", host.name, 2, false);
+		reels.comment(p.id, "Steve_Baut", "Stark!", NOON - 3000);
+		host.online = new ArrayList<String>(java.util.Arrays.asList("Stefan99", "Alex", host.name, "[NPC] Händler"));
+		host.friends = new ArrayList<String>(java.util.Arrays.asList("Steffi_K", "alex"));
+		return p;
+	}
+
+	@Test
+	void typingAtOffersNamesAndTabCompletes() {
+		ReelsPost p = namesEverywhere();
+		for (PhoneHold hold : PhoneHold.values()) {
+			String tag = hold.toString();
+			boolean land = hold == PhoneHold.LANDSCAPE;
+			PhoneUi ui = comments(hold);
+			type(ui, "Hi ");
+			assertTrue(ui.testSuggestions().isEmpty(), tag);
+			assertNull(ui.testSpot("suggest0"), tag);
+			type(ui, "@");
+			// Dieser Post, dann der Server, die Freunde, der übrige Feed – je Quelle nach dem Alphabet; nie der eigene Name,
+			// nie ein Name doppelt, nie etwas, das kein Spielername ist.
+			assertEquals(java.util.Arrays.asList("Steve_Baut", "Alex", "Stefan99", "Steffi_K", "Stonecutter7"), ui.testSuggestions(), tag);
+			type(ui, "St");
+			assertEquals(java.util.Arrays.asList("Steve_Baut", "Stefan99", "Steffi_K", "Stonecutter7"), ui.testSuggestions(), tag);
+			RecCanvas c = frame(ui);
+			// Die Leiste mit den Namen steht direkt über dem Feld, der Hinweis darüber.
+			int[] first = onPhone(ui, "suggest0");
+			assertEquals(land ? 18 : 13, first[0], tag);
+			assertEquals(land ? 396 : 713, first[1], tag);
+			assertEquals(land ? 43 : 42, first[3], tag);
+			assertEquals(12 * 11 + 2 * (land ? 13 : 10), first[2], tag + ": „@Steve_Baut“ und der Rand");
+			assertNotNull(textOf(c, "@Steve_Baut"), tag + ": " + c.strings());
+			int[] input = spot(ui, "commentInput"), sheet = spot(ui, "commentSheet");
+			int shown = 0;
+			for (int i = 0; i < 4; i++) {
+				int[] chip = ui.testSpot("suggest" + i);
+				if (chip == null) break;
+				shown++;
+				assertTrue(inside(chip, sheet), tag);
+				assertTrue(chip[0] >= input[0] && chip[0] + chip[2] <= input[0] + input[2], tag + ": in der Zeile");
+				assertTrue(chip[3] >= 40, tag);
+				if (i > 0) assertEquals(spot(ui, "suggest" + (i - 1))[0] + spot(ui, "suggest" + (i - 1))[2] + (land ? 8 : 6), chip[0], tag);
+			}
+			assertEquals(land ? 4 : 2, shown, tag + ": so viele, wie in eine Zeile passen");
+			// Der markierte (der erste) hat einen gelben Rahmen, die anderen einen grauen.
+			int[] s0 = spot(ui, "suggest0"), s1 = spot(ui, "suggest1");
+			int frameW = land ? 3 : 2;
+			assertNotNull(fillOf(c, FeedView.AMBER_LINE, s0[0], s0[1], s0[0] + s0[2], s0[1] + frameW), tag);
+			assertNotNull(fillOf(c, FeedView.FIELD_LINE, s1[0], s1[1], s1[0] + s1[2], s1[1] + frameW), tag);
+
+			keys(ui, UiKey.TAB, 1);
+			assertEquals("Hi @Steve_Baut ", ui.testCommentText(), tag);
+			assertEquals(15, ui.testCommentCaret(), tag);
+			assertTrue(ui.testSuggestions().isEmpty(), tag);
+			c = frame(ui);
+			assertNull(ui.testSpot("suggest0"), tag);
+			// Tab ohne Vorschläge tut nichts – das Blatt bleibt, der Text auch.
+			keys(ui, UiKey.TAB, 1);
+			assertEquals("Hi @Steve_Baut ", ui.testCommentText(), tag);
+			assertEquals(PhoneUi.View.COMMENTS, ui.testView(), tag);
+			type(ui, "wo ist das?");
+			int before = backend.feed().get(0).comments.size();
+			keys(ui, UiKey.ENTER, 1);
+			List<ReelsComment> list = backend.feed().get(0).comments;
+			assertEquals(before + 1, list.size(), tag);
+			assertEquals("Hi @Steve_Baut wo ist das?", list.get(list.size() - 1).text, tag);
+			assertEquals(p.id, backend.feed().get(0).id, tag);
+			ui.dispose();
+		}
+	}
+
+	@Test
+	void namesAreOfferedForTheTokenBeforeTheCaret() {
+		namesEverywhere();
+		PhoneUi ui = comments(PhoneHold.LANDSCAPE);
+		type(ui, "@St wo bist du");
+		assertTrue(ui.testSuggestions().isEmpty(), "die Schreibmarke steht hinter „du“");
+		keys(ui, UiKey.HOME, 1);
+		assertTrue(ui.testSuggestions().isEmpty());
+		keys(ui, UiKey.RIGHT, 2);
+		assertTrue(ui.testSuggestions().isEmpty(), "mitten im Namen: hinter der Schreibmarke steht noch ein Buchstabe");
+		keys(ui, UiKey.RIGHT, 1);
+		assertEquals(java.util.Arrays.asList("Steve_Baut", "Stefan99", "Steffi_K", "Stonecutter7"), ui.testSuggestions());
+		frame(ui);
+		assertNotNull(ui.testSpot("suggest0"));
+		keys(ui, UiKey.TAB, 1);
+		assertEquals("@Steve_Baut wo bist du", ui.testCommentText(), "kein zweites Leerzeichen");
+		assertEquals(12, ui.testCommentCaret(), "hinter dem Leerzeichen");
+		// Weiter getippt wird an der Schreibmarke.
+		type(ui, "hey, ");
+		assertEquals("@Steve_Baut hey, wo bist du", ui.testCommentText());
+		// Ein zweiter Name am Ende.
+		keys(ui, UiKey.END, 1);
+		type(ui, " @al");
+		assertEquals(java.util.Arrays.asList("Alex"), ui.testSuggestions(), "ohne Groß-/Kleinschreibung, der Freund „alex“ ist derselbe");
+		keys(ui, UiKey.TAB, 1);
+		assertEquals("@Steve_Baut hey, wo bist du @Alex ", ui.testCommentText());
+		// Rücktaste zurück in den Namen: es wird wieder angeboten.
+		keys(ui, UiKey.BACKSPACE, 3);
+		assertEquals("@Steve_Baut hey, wo bist du @Al", ui.testCommentText());
+		assertEquals(java.util.Arrays.asList("Alex"), ui.testSuggestions());
+		keys(ui, UiKey.BACKSPACE, 3);
+		assertTrue(ui.testSuggestions().isEmpty());
+		ui.dispose();
+	}
+
+	@Test
+	void upAndDownMoveTheMarkedNameAndItStaysVisible() {
+		ReelsPost p = post("Schaut mal!", host.name, 2, false);
+		for (int n = 0; n < 8; n++) reels.comment(p.id, "Gast" + n, "Kommentar " + n, NOON - 8000 + n);
+		host.online = new ArrayList<String>(java.util.Arrays.asList("Langer_Name_0001x", "Langer_Name_0002", "Langer_Name_0003", "Langer_Name_0004",
+				"Langer_Name_0005", "Langer_Name_0006", "Langer_Name_0007"));
+		// Hochkant passt nur ein Name mit 16 Zeichen in die Zeile.
+		PhoneUi ui = comments(PhoneHold.PORTRAIT);
+		type(ui, "@Lang");
+		assertEquals(5, ui.testSuggestions().size(), "höchstens fünf");
+		assertEquals("Langer_Name_0002", ui.testSuggestions().get(0), "17 Zeichen sind kein Spielername");
+		int[] input = spot(ui, "commentInput");
+		for (int marked = 0; marked < 5; marked++) {
+			RecCanvas c = frame(ui);
+			int[] chip = spot(ui, "suggest" + marked);
+			assertTrue(chip[0] >= input[0] && chip[0] + chip[2] <= input[0] + input[2], "markiert " + marked + " ist ganz zu sehen");
+			assertNotNull(fillOf(c, FeedView.AMBER_LINE, chip[0], chip[1], chip[0] + chip[2], chip[1] + 2), "markiert " + marked);
+			assertNotNull(textOf(c, "@" + ui.testSuggestions().get(marked)), "markiert " + marked);
+			for (int i = 0; i < 5; i++) {
+				int[] other = ui.testSpot("suggest" + i);
+				if (other != null) assertTrue(other[0] >= input[0] && other[0] + other[2] <= input[0] + input[2], "kein halber Name");
+			}
+			assertNull(ui.testSpot("suggest" + (marked + 1)), "daneben passt keiner");
+			keys(ui, UiKey.DOWN, 1);
+		}
+		// Am Ende ist Schluss; Pfeil hoch geht zurück. Dabei blättert nichts, und die Schreibmarke bleibt.
+		keys(ui, UiKey.DOWN, 3);
+		frame(ui);
+		assertNotNull(ui.testSpot("suggest4"));
+		keys(ui, UiKey.UP, 1);
+		frame(ui);
+		assertNotNull(ui.testSpot("suggest3"));
+		assertNull(ui.testSpot("suggest4"));
+		assertEquals(0, ui.testCommentScroll());
+		assertEquals(5, ui.testCommentCaret());
+		assertEquals("@Lang", ui.testCommentText());
+		keys(ui, UiKey.TAB, 1);
+		assertEquals("@Langer_Name_0005 ", ui.testCommentText(), "Tab nimmt den markierten");
+		// Ohne Vorschläge blättern die Pfeile wieder in den Kommentaren.
+		keys(ui, UiKey.UP, 1);
+		assertEquals(1, ui.testCommentScroll());
+		keys(ui, UiKey.DOWN, 1);
+		assertEquals(0, ui.testCommentScroll());
+		ui.dispose();
+
+		// Quer: mehrere nebeneinander – die Zeile rückt erst weiter, wenn der markierte nicht mehr hineinpasst.
+		ui = comments(PhoneHold.LANDSCAPE);
+		type(ui, "@Lang");
+		frame(ui);
+		assertNotNull(ui.testSpot("suggest0"));
+		assertNotNull(ui.testSpot("suggest3"));
+		assertNull(ui.testSpot("suggest4"), "der fünfte passt nicht mehr daneben");
+		keys(ui, UiKey.DOWN, 3);
+		frame(ui);
+		assertNotNull(ui.testSpot("suggest0"), "die Zeile bleibt stehen, solange der markierte zu sehen ist");
+		keys(ui, UiKey.DOWN, 1);
+		frame(ui);
+		assertNull(ui.testSpot("suggest0"));
+		int[] last = spot(ui, "suggest4"), field = spot(ui, "commentInput");
+		assertTrue(last[0] + last[2] <= field[0] + field[2]);
+		assertEquals(field[0], spot(ui, "suggest1")[0], "die Zeile beginnt mit dem zweiten");
+		ui.dispose();
+	}
+
+	@Test
+	void clickOnANameCompletes() {
+		namesEverywhere();
+		PhoneUi ui = comments(PhoneHold.LANDSCAPE);
+		type(ui, "Na @S");
+		assertEquals(java.util.Arrays.asList("Steve_Baut", "Stefan99", "Steffi_K", "Stonecutter7"), ui.testSuggestions());
+		frame(ui);
+		click(ui, "suggest2");
+		assertEquals("Na @Steffi_K ", ui.testCommentText());
+		assertEquals(13, ui.testCommentCaret());
+		assertTrue(ui.testSuggestions().isEmpty());
+		assertEquals(PhoneUi.View.COMMENTS, ui.testView());
+		frame(ui);
+		assertNull(ui.testSpot("suggest0"));
+		// Passt „@Name “ nicht mehr ins Feld, bleibt alles, wie es ist.
+		keys(ui, UiKey.BACKSPACE, 13);
+		type(ui, chars(ReelsComment.MAX_TEXT - 4) + " @St");
+		assertEquals(ReelsComment.MAX_TEXT, ui.testCommentText().length());
+		frame(ui);
+		click(ui, "suggest0");
+		assertEquals(chars(ReelsComment.MAX_TEXT - 4) + " @St", ui.testCommentText());
+		ui.dispose();
+	}
+
+	@Test
+	void noNamesAreOfferedInTheMiddleOfAWord() {
+		namesEverywhere();
+		PhoneUi ui = comments(PhoneHold.LANDSCAPE);
+		type(ui, "@Steve");
+		assertEquals(java.util.Arrays.asList("Steve_Baut"), ui.testSuggestions());
+		keys(ui, UiKey.LEFT, 2);
+		assertTrue(ui.testSuggestions().isEmpty(), "mitten im Namen");
+		frame(ui);
+		assertNull(ui.testSpot("suggest0"));
+		keys(ui, UiKey.END, 1);
+		assertEquals(java.util.Arrays.asList("Steve_Baut"), ui.testSuggestions());
+		// Eine Mail-Adresse ist kein Name, ein @ hinter einem Buchstaben auch nicht.
+		keys(ui, UiKey.BACKSPACE, 6);
+		type(ui, "mail@St");
+		assertTrue(ui.testSuggestions().isEmpty());
+		keys(ui, UiKey.BACKSPACE, 7);
+		type(ui, "a@");
+		assertTrue(ui.testSuggestions().isEmpty());
+		// Steht der Name schon ganz da, wird er nicht noch einmal angeboten.
+		keys(ui, UiKey.BACKSPACE, 2);
+		type(ui, "@steve_baut");
+		assertTrue(ui.testSuggestions().isEmpty());
+		// Kein Treffer: keine Leiste.
+		keys(ui, UiKey.BACKSPACE, 11);
+		type(ui, "@Zz");
+		assertTrue(ui.testSuggestions().isEmpty());
+		frame(ui);
+		assertNull(ui.testSpot("suggest0"));
+		ui.dispose();
+	}
+
+	@Test
+	void mentionOfSomeoneElseShowsTheLocalNote() {
+		namesEverywhere();
+		String note = I18n.tr("reels.comment.local");
+		for (PhoneHold hold : PhoneHold.values()) {
+			String tag = hold.toString();
+			boolean land = hold == PhoneHold.LANDSCAPE;
+			PhoneUi ui = comments(hold);
+			type(ui, "Hallo ");
+			RecCanvas c = frame(ui);
+			assertNull(ui.testSpot("commentNote"), tag);
+			assertFalse(all(c).contains("nobody"), tag);
+			// Solange Namen zur Wahl stehen: Leiste und Hinweis.
+			type(ui, "@St");
+			c = frame(ui);
+			int[] n = spot(ui, "commentNote"), chip = spot(ui, "suggest0");
+			assertEquals(chip[1], n[1] + n[3] + (land ? 8 : 6), tag + ": direkt über den Namen");
+			assertTrue(all(c).contains(note), tag + ": " + c.strings());
+			for (RecCanvas.Text t : c.texts) if (note.startsWith(t.text)) assertEquals(FeedView.TEXT_DIM, t.argb, tag);
+			assertEquals(land ? 16 : 36, n[3], tag + ": quer eine Zeile, hochkant zwei");
+			// Der Name steht da: keine Leiste mehr, aber der Hinweis bleibt – direkt über dem Feld.
+			keys(ui, UiKey.TAB, 1);
+			c = frame(ui);
+			assertNull(ui.testSpot("suggest0"), tag);
+			n = spot(ui, "commentNote");
+			assertEquals(spot(ui, "commentInput")[1], n[1] + n[3] + (land ? 8 : 6), tag);
+			assertTrue(all(c).contains(note), tag);
+			assertTrue(inside(n, spot(ui, "commentSheet")), tag);
+			// Die Liste endet über dem Hinweis.
+			int[] row = spot(ui, "commentRow0");
+			assertTrue(row[1] + row[3] <= n[1], tag);
+			// Nur der eigene Name: niemand anderes ist gemeint – kein Hinweis.
+			keys(ui, UiKey.BACKSPACE, ui.testCommentText().length());
+			type(ui, "ich bin @" + host.name + " ");
+			c = frame(ui);
+			assertNull(ui.testSpot("commentNote"), tag);
+			assertFalse(all(c).contains(note), tag);
+			ui.dispose();
+		}
+	}
+
+	@Test
+	void streamerModeOffersNoServerOrFriendNames() {
+		namesEverywhere();
+		PhoneUi ui = comments(PhoneHold.LANDSCAPE);
+		ui.testStreamer = Boolean.TRUE;
+		int friendCalls = host.friendCalls;
+		type(ui, "@");
+		assertEquals(java.util.Arrays.asList("Steve_Baut", "Stonecutter7"), ui.testSuggestions(), "nur, was im Feed ohnehin steht");
+		type(ui, "S");
+		assertEquals(0, host.onlineCalls, "der Server wird gar nicht erst gefragt");
+		assertEquals(friendCalls, host.friendCalls, "die Freundesliste auch nicht");
+		ui.dispose();
+		// Aus – und ohne TRS-Dienste (wie in diesem Test: Qol.get() ist null) – kommen sie dazu.
+		for (Boolean streamer : new Boolean[]{Boolean.FALSE, null}) {
+			ui = comments(PhoneHold.LANDSCAPE);
+			ui.testStreamer = streamer;
+			type(ui, "@");
+			assertEquals(java.util.Arrays.asList("Steve_Baut", "Alex", "Stefan99", "Steffi_K", "Stonecutter7"), ui.testSuggestions());
+			ui.dispose();
+		}
+	}
+
+	@Test
+	void suggestionsAreNotRecomputedWhileTheTokenStaysTheSame() {
+		namesEverywhere();
+		PhoneUi ui = comments(PhoneHold.LANDSCAPE);
+		assertEquals(0, host.onlineCalls);
+		int friendCalls = host.friendCalls;
+		type(ui, "Hi @S");
+		// Der Server wird einmal gefragt, wenn ein Namensanfang auftaucht; gerechnet wird je Namensanfang einmal („“ und „S“).
+		assertEquals(1, host.onlineCalls);
+		assertEquals(friendCalls + 2, host.friendCalls);
+		for (int i = 0; i < 5; i++) frame(ui);
+		keys(ui, UiKey.DOWN, 2);
+		keys(ui, UiKey.UP, 1);
+		for (int i = 0; i < 5; i++) frame(ui);
+		assertEquals(1, host.onlineCalls, "Bilder und Pfeile rechnen nichts neu");
+		assertEquals(friendCalls + 2, host.friendCalls);
+		// Wer inzwischen den Server betritt, kommt erst beim nächsten Namen dazu.
+		host.online.add("Sven_Neu");
+		type(ui, "t");
+		assertEquals(1, host.onlineCalls, "derselbe Name: dieselbe Liste vom Server");
+		assertEquals(friendCalls + 3, host.friendCalls);
+		keys(ui, UiKey.BACKSPACE, 1);
+		assertFalse(ui.testSuggestions().contains("Sven_Neu"));
+		// Namensanfang weg und wieder da: neu gefragt.
+		keys(ui, UiKey.BACKSPACE, 2);
+		assertTrue(ui.testSuggestions().isEmpty());
+		type(ui, "@S");
+		assertEquals(2, host.onlineCalls);
+		assertTrue(ui.testSuggestions().contains("Sven_Neu"), ui.testSuggestions().toString());
+		// Ohne @ wird nie gefragt.
+		keys(ui, UiKey.BACKSPACE, 2);
+		type(ui, "ein ganz normaler Satz");
+		for (int i = 0; i < 3; i++) frame(ui);
+		assertEquals(2, host.onlineCalls);
+		ui.dispose();
+	}
+
+	@Test
+	void wheelScrollsCommentsAndNeverPagesTheFeed() {
+		post("Älter", host.name, 30, false);
+		ReelsPost p = post("Schaut mal!", host.name, 2, false);
+		for (int n = 0; n < 12; n++) reels.comment(p.id, "Gast" + n, "Kommentar " + n, NOON - 12000 + n);
+		for (PhoneHold hold : PhoneHold.values()) {
+			String tag = hold.toString();
+			int visible = hold == PhoneHold.LANDSCAPE ? 5 : 6;
+			PhoneUi ui = comments(hold);
+			assertEquals(0, ui.testCommentScroll(), tag);
+			assertEquals(visible, ui.commentsShown, tag);
+			assertNotNull(ui.testSpot("commentRow11"), tag);
+			int[] lowest = spot(ui, "commentRow11");
+			// Rad nach oben: ein Kommentar je Raste, ältere kommen von oben nach.
+			assertTrue(ui.inputScroll(0, 0, 1), tag);
+			assertEquals(1, ui.testCommentScroll(), tag);
+			assertEquals(0, ui.testPage(), tag + ": der Feed bleibt");
+			RecCanvas c = frame(ui);
+			assertNull(ui.testSpot("commentRow11"), tag);
+			assertArrayEquals(lowest, spot(ui, "commentRow10"), tag + ": der nächste steht jetzt an derselben Stelle");
+			assertTrue(c.shows("Kommentar " + (11 - visible)), tag);
+			assertEquals(visible, ui.commentsShown, tag);
+			// Bis der älteste zu sehen ist – weiter geht es nicht.
+			for (int i = 0; i < 30; i++) {
+				ui.inputScroll(0, 0, 1);
+				c = frame(ui);
+			}
+			assertEquals(12 - visible, ui.testCommentScroll(), tag);
+			assertNotNull(ui.testSpot("commentRow0"), tag);
+			assertTrue(c.shows("Kommentar 0"), tag);
+			assertEquals(visible, ui.commentsShown, tag);
+			assertEquals(0, ui.testPage(), tag);
+			// Und wieder hinunter, auch über das Ende hinaus: der Feed blättert nie.
+			for (int i = 0; i < 30; i++) {
+				ui.inputScroll(0, 0, -1);
+				frame(ui);
+			}
+			assertEquals(0, ui.testCommentScroll(), tag);
+			assertEquals(0, ui.testPage(), tag);
+			assertNotNull(ui.testSpot("commentRow11"), tag);
+			// Pfeil hoch und runter blättern genauso (solange keine Namen zur Wahl stehen).
+			keys(ui, UiKey.UP, 2);
+			assertEquals(2, ui.testCommentScroll(), tag);
+			keys(ui, UiKey.DOWN, 1);
+			assertEquals(1, ui.testCommentScroll(), tag);
+			assertEquals(0, ui.testPage(), tag);
+			assertEquals("", ui.testCommentText(), tag);
+			// Nach dem Schließen blättert das Rad wieder im Feed – und das nächste Blatt beginnt unten.
+			keys(ui, UiKey.ESCAPE, 1);
+			ui.inputScroll(0, 0, -1);
+			assertEquals(1, ui.testPage(), tag);
+			ui.inputScroll(0, 0, 1);
+			keys(ui, UiKey.ENTER, 1);
+			assertEquals(0, ui.testCommentScroll(), tag);
+			ui.dispose();
+		}
+	}
+
+	@Test
+	void newCommentScrollsIntoView() {
+		ReelsPost p = post("Schaut mal!", host.name, 2, false);
+		ReelsComment first = reels.comment(p.id, "Gast", "Der allererste", NOON - 20000);
+		for (int n = 0; n < 12; n++) reels.comment(p.id, "Gast" + n, "Kommentar " + n, NOON - 12000 + n);
+		PhoneUi ui = comments(PhoneHold.LANDSCAPE);
+		for (int i = 0; i < 4; i++) {
+			ui.inputScroll(0, 0, 1);
+			frame(ui);
+		}
+		assertEquals(4, ui.testCommentScroll());
+		type(ui, "Ganz neu");
+		keys(ui, UiKey.ENTER, 1);
+		RecCanvas c = frame(ui);
+		assertEquals(0, ui.testCommentScroll(), "die Liste steht wieder unten");
+		assertTrue(c.shows("Ganz neu"), c.strings().toString());
+		int[] row = spot(ui, "commentRow13");
+		assertTrue(row[1] + row[3] <= spot(ui, "commentInput")[1]);
+
+		// Antwort auf einen alten Kommentar weit oben: sie steht direkt unter ihm und ist danach zu sehen.
+		for (int i = 0; i < 30 && ui.testSpot("commentReply0") == null; i++) {
+			ui.inputScroll(0, 0, 1);
+			frame(ui);
+		}
+		click(ui, "commentReply0");
+		type(ui, "Antwort nach oben");
+		keys(ui, UiKey.ENTER, 1);
+		c = frame(ui);
+		List<ReelsComment> list = backend.feed().get(0).comments;
+		assertEquals(first.id, list.get(list.size() - 1).replyTo);
+		assertTrue(c.shows("Antwort nach oben"), c.strings().toString());
+		int[] reply = spot(ui, "commentRow1"), parent = spot(ui, "commentRow0");
+		assertTrue(parent[1] < reply[1], "ihr Kommentar steht darüber");
+		assertTrue(inside(reply, spot(ui, "commentSheet")));
+		assertEquals(13, ui.testCommentScroll(), "unterste Zeile: 15 Zeilen, die Antwort ist die zweite");
+		// Ein kurzer Faden bleibt dabei ganz stehen: nichts verschwindet nach unten.
+		ui.dispose();
+		ReelsPost shortPost = post("Kurz", host.name, 1, false);
+		ReelsComment a = reels.comment(shortPost.id, "Gast", "Eins", NOON - 900);
+		reels.comment(shortPost.id, "Gast", "Zwei", NOON - 800);
+		ui = comments(PhoneHold.LANDSCAPE);
+		click(ui, "commentReply0");
+		type(ui, "Dazwischen");
+		keys(ui, UiKey.ENTER, 1);
+		frame(ui);
+		assertEquals(0, ui.testCommentScroll());
+		assertEquals(3, ui.commentsShown);
+		assertEquals(a.id, backend.feed().get(0).comments.get(2).replyTo);
+		ui.dispose();
+	}
+
+	@Test
+	void mentionOfTheOwnNameShowsBadgeAndToastOnce() {
+		ReelsPost p = post("Schaut mal!", host.name, 2, false);
+		reels.comment(p.id, "Rotkaeppchen", "Hübsch.", NOON - 3000);
+		backend.comment(p.id, "Steve_Baut", "Stark! @" + host.name.toLowerCase(java.util.Locale.ROOT) + " wo ist das?", NOON - 1000);
+		for (PhoneHold hold : PhoneHold.values()) {
+			String tag = hold.toString();
+			boolean first = hold == PhoneHold.LANDSCAPE;
+			PhoneUi ui = feed(hold);
+			RecCanvas c = frame(ui);
+			assertEquals(1, ui.testUnseenPings(), tag);
+			// Die Meldung kommt einmal nach dem Start – beim zweiten Herausholen nicht wieder.
+			if (first) assertEquals(I18n.tr("reels.toast.ping", "Steve_Baut"), ui.testToast(), tag);
+			else assertNull(ui.testToast(), tag + ": nicht bei jedem Herausholen");
+			// Die Marke bleibt, bis die Kommentare geöffnet wurden: gelbes Quadrat mit der Zahl, oben rechts am Symbol.
+			int[] badge = spot(ui, "pingBadge"), icon = spot(ui, "comment"), screen = spot(ui, "screen");
+			assertTrue(inside(badge, screen), tag);
+			assertTrue(overlap(badge, icon), tag);
+			assertEquals(badge[2], badge[3], tag + ": quadratisch");
+			assertTrue(badge[0] + badge[2] > icon[0] + icon[2] / 2 && badge[1] < icon[1] + icon[3] / 2, tag + ": oben rechts");
+			assertNotNull(fillOf(c, FeedView.AMBER, badge[0], badge[1], badge[0] + badge[2], badge[1] + badge[3]), tag);
+			RecCanvas.Text one = null;
+			for (RecCanvas.Text t : c.texts) if (t.text.equals("1") && t.argb == FeedView.PING_TEXT) one = t;
+			assertNotNull(one, tag + ": dunkle Zahl auf Gelb");
+			assertTrue(one.x >= badge[0] && one.x + one.w - one.scale <= badge[0] + badge[2] && one.y >= badge[1]
+					&& one.y + one.h <= badge[1] + badge[3], tag + ": " + one);
+			assertFalse(overlap(badge, spot(ui, "heart")), tag);
+			ui.dispose();
+		}
+		// Kommt eine zweite dazu, während das Handy draußen ist, meldet es sich wieder – jetzt mit der Zahl.
+		PhoneUi ui = feed(PhoneHold.PORTRAIT);
+		assertNull(ui.testToast());
+		backend.comment(p.id, "Rotkaeppchen", "@" + host.name + " ich will auch!", NOON - 500);
+		RecCanvas c = frame(ui);
+		assertEquals(I18n.tr("reels.toast.pings", 2), ui.testToast());
+		assertEquals(2, ui.testUnseenPings());
+		boolean two = false;
+		for (RecCanvas.Text t : c.texts) if (t.text.equals("2") && t.argb == FeedView.PING_TEXT) two = true;
+		assertTrue(two, c.strings().toString());
+		// Ohne Erwähnung: keine Marke.
+		ui.dispose();
+		ReelsPost plain = post("Ohne", host.name, 1, false);
+		reels.comment(plain.id, "Steve_Baut", "Nur so.", NOON - 100);
+		ui = feed(PhoneHold.LANDSCAPE);
+		assertEquals(plain.id, backend.feed().get(ui.testPage()).id);
+		assertNull(ui.testSpot("pingBadge"));
+		ui.dispose();
+	}
+
+	@Test
+	void aPlainReplyUsesTheReplyToast() {
+		ReelsPost p = post("Schaut mal!", host.name, 2, false);
+		ReelsComment mine = reels.comment(p.id, host.name, "Der Panda wohnt hier", NOON - 3000);
+		// Eine eigene Antwort und die Antwort auf einen fremden Kommentar zählen nicht.
+		ReelsComment other = backend.comment(p.id, "Rotkaeppchen", "Hübsch.", NOON - 2500);
+		backend.reply(p.id, mine.id, host.name, "Und die Katze.", NOON - 2000);
+		backend.reply(p.id, other.id, "Steve_Baut", "Finde ich auch", NOON - 1500);
+		PhoneUi ui = feed(PhoneHold.LANDSCAPE);
+		assertNull(ui.testToast());
+		assertNull(ui.testSpot("pingBadge"));
+		assertEquals(0, ui.testUnseenPings());
+		// Eine Antwort auf den eigenen Kommentar, ohne den Namen zu nennen.
+		backend.reply(p.id, mine.id, "Steve_Baut", "Ehrlich? Zeig mal!", NOON - 1000);
+		frame(ui);
+		assertEquals(I18n.tr("reels.toast.reply", "Steve_Baut"), ui.testToast());
+		assertNotNull(ui.testSpot("pingBadge"));
+		assertEquals(1, ui.testUnseenPings());
+		ui.dispose();
+	}
+
+	@Test
+	void aPingUnderTheOpenSheetIsMarkedSeenAtOnce() {
+		ReelsPost p = post("Schaut mal!", host.name, 2, false);
+		reels.comment(p.id, host.name, "Der Panda wohnt hier", NOON - 3000);
+		PhoneUi ui = comments(PhoneHold.LANDSCAPE);
+		assertNull(ui.testToast());
+		ReelsComment ping = backend.comment(p.id, "Steve_Baut", "@" + host.name + " zeig mal!", NOON - 1000);
+		assertNull(ping.seen);
+		RecCanvas c = frame(ui);
+		// Er steht da – und ist damit gesehen: keine Meldung, keine Marke, und es ist gespeichert.
+		assertTrue(c.shows("@" + host.name), c.strings().toString());
+		assertEquals(0, ui.testUnseenPings());
+		assertNull(ui.testToast());
+		assertEquals(Boolean.TRUE, backend.feed().get(0).comments.get(1).seen);
+		assertEquals(Boolean.TRUE, new LocalReelsBackend(tmp, UTC).feed().get(0).comments.get(1).seen, "auf der Platte");
+		keys(ui, UiKey.ESCAPE, 1);
+		frame(ui);
+		assertNull(ui.testSpot("pingBadge"));
+		assertNull(ui.testToast());
+		ui.dispose();
+		// Auch das nächste Handy meldet nichts.
+		ui = feed(PhoneHold.LANDSCAPE);
+		assertNull(ui.testToast());
+		ui.dispose();
+	}
+
+	@Test
+	void clickOnThePingToastOpensThatPostsComments() {
+		ReelsPost old = post("Ganz alt", host.name, 50, false);
+		post("Mittel", "Steve_Baut", 20, false);
+		post("Neu", host.name, 2, false);
+		backend.comment(old.id, "Steve_Baut", "@" + host.name + " schau mal hier", NOON - 1000);
+		PhoneUi ui = feed(PhoneHold.LANDSCAPE);
+		assertEquals(I18n.tr("reels.toast.ping", "Steve_Baut"), ui.testToast());
+		assertEquals(0, ui.testPage());
+		// Ein Blatt ist offen – der Klick auf die Meldung geht trotzdem vor.
+		ui.openSheet(PhoneUi.Sheet.FILTER);
+		frame(ui);
+		click(ui, "toast");
+		assertEquals(PhoneUi.View.COMMENTS, ui.testView());
+		assertEquals(PhoneUi.Sheet.NONE, ui.testSheet());
+		assertEquals(2, ui.testPage(), "der Post mit der Erwähnung");
+		assertNull(ui.testToast(), "die Meldung hat ihren Dienst getan");
+		assertEquals(0, ui.testUnseenPings());
+		RecCanvas c = frame(ui);
+		assertTrue(c.shows("schau mal hier"), c.strings().toString());
+		assertTrue(c.shows("Ganz alt"));
+		ui.dispose();
+
+		// Zeigt der Filter den Post nicht, führt die Meldung nirgendwohin: sie ist nur Text.
+		backend = new LocalReelsBackend(tmp.resolve("filter"), UTC);
+		reels = Reels.forTest(modules, backend, DIRECT, UTC);
+		post("Eigener", host.name, 3, false);
+		ReelsPost foreign = post("Fremder", "Steve_Baut", 2, false);
+		backend.comment(foreign.id, "Rotkaeppchen", "@" + host.name + " guck!", NOON - 1000);
+		modules.reels.feedFilter.set(FeedFilter.MINE);
+		ui = feed(PhoneHold.LANDSCAPE);
+		assertEquals(I18n.tr("reels.toast.ping", "Rotkaeppchen"), ui.testToast());
+		int[] toast = spot(ui, "toast");
+		ui.inputClick((toast[0] + toast[2] / 2.0) / host.gui, (toast[1] + toast[3] / 2.0) / host.gui, 0);
+		assertEquals(PhoneUi.View.FEED, ui.testView());
+		assertEquals(1, ui.testUnseenPings());
+		ui.dispose();
+		modules.reels.feedFilter.set(FeedFilter.ALL);
+
+		// In der Kamera nimmt die Meldung keinen Klick an (sie würde das Foto kosten).
+		backend = new LocalReelsBackend(tmp.resolve("kamera"), UTC);
+		reels = Reels.forTest(modules, backend, DIRECT, UTC);
+		ReelsPost mine = post("Eigener", host.name, 3, false);
+		ui = feed(PhoneHold.LANDSCAPE);
+		ui.openCamera();
+		backend.comment(mine.id, "Rotkaeppchen", "@" + host.name + " guck!", NOON - 1000);
+		frame(ui);
+		assertEquals(I18n.tr("reels.toast.ping", "Rotkaeppchen"), ui.testToast());
+		toast = spot(ui, "toast");
+		ui.inputClick((toast[0] + toast[2] / 2.0) / host.gui, (toast[1] + toast[3] / 2.0) / host.gui, 0);
+		assertEquals(PhoneUi.View.CAMERA, ui.testView());
+		ui.dispose();
+	}
+
+	@Test
+	void openingTheCommentsClearsTheBadgeAndStoresSeen() throws IOException {
+		ReelsPost p = post("Schaut mal!", host.name, 2, false);
+		ReelsComment mine = reels.comment(p.id, host.name, "Der Panda wohnt hier", NOON - 3000);
+		backend.comment(p.id, "Steve_Baut", "Stark! @" + host.name + " wo ist das?", NOON - 2000);
+		backend.reply(p.id, mine.id, "Rotkaeppchen", "Will ich sehen", NOON - 1000);
+		backend.flush();
+		assertFalse(new String(Files.readAllBytes(tmp.resolve("feed.json")), java.nio.charset.StandardCharsets.UTF_8).contains("\"seen\""));
+		PhoneUi ui = feed(PhoneHold.PORTRAIT);
+		assertEquals(I18n.tr("reels.toast.pings", 2), ui.testToast());
+		assertEquals(2, ui.testUnseenPings());
+		assertNotNull(ui.testSpot("pingBadge"));
+		click(ui, "comment");
+		assertEquals(PhoneUi.View.COMMENTS, ui.testView());
+		assertEquals(0, ui.testUnseenPings());
+		frame(ui);
+		keys(ui, UiKey.ESCAPE, 1);
+		RecCanvas c = frame(ui);
+		assertNull(ui.testSpot("pingBadge"), "die Marke ist weg");
+		for (RecCanvas.Text t : c.texts) assertFalse(t.argb == FeedView.PING_TEXT, "keine Zahl mehr: " + t);
+		ui.dispose();
+		// Gespeichert: nach einem Neustart ist nichts mehr ungesehen, und nichts meldet sich.
+		String json = new String(Files.readAllBytes(tmp.resolve("feed.json")), java.nio.charset.StandardCharsets.UTF_8);
+		assertTrue(json.contains("\"seen\": true") || json.contains("\"seen\":true"), json);
+		backend = new LocalReelsBackend(tmp, UTC);
+		List<ReelsComment> list = backend.feed().get(0).comments;
+		assertNull(list.get(0).seen, "der eigene Kommentar trägt nichts");
+		assertEquals(Boolean.TRUE, list.get(1).seen);
+		assertEquals(Boolean.TRUE, list.get(2).seen);
+		reels = Reels.forTest(modules, backend, DIRECT, UTC);
+		ui = feed(PhoneHold.PORTRAIT);
+		assertNull(ui.testToast());
+		assertNull(ui.testSpot("pingBadge"));
+		assertEquals(0, ui.testUnseenPings());
+		ui.dispose();
+	}
+
+	@Test
+	void aLongCommentIsShownInFullInPortrait() {
+		ReelsPost p = post("Schaut mal!", host.name, 2, false);
+		String author = "Rotkaeppchen_mit_langem_Namen_32";
+		assertEquals(ReelsPost.MAX_AUTHOR, author.length());
+		String text = "Das ist wirklich der schönste Panda, den ich je in einem Bambuswald gesehen habe – wo genau steht der und darf ich";
+		while (text.length() < ReelsComment.MAX_TEXT) text = text + (text.length() == 114 ? " " : "!");
+		assertEquals(ReelsComment.MAX_TEXT, text.length());
+		assertFalse(text.endsWith(" "));
+		ReelsComment longOne = reels.comment(p.id, author, "kurz", NOON - 3000);
+		assertNotNull(backend.editComment(p.id, longOne.id, author, text, NOON - 2000));
+		String label = I18n.tr("reels.comment.edited");
+		for (PhoneHold hold : PhoneHold.values()) {
+			String tag = hold.toString();
+			PhoneUi ui = comments(hold);
+			RecCanvas c = frame(ui);
+			int[] row = spot(ui, "commentRow0");
+			assertTrue(inside(row, spot(ui, "commentSheet")), tag);
+			int lines = (row[3] - 16) / 20;
+			assertEquals(row[3], lines * 20 + 16, tag + ": Zeilen zu 20 px und die Link-Zeile");
+			if (hold == PhoneHold.LANDSCAPE) assertTrue(lines >= 2 && lines <= 3, tag + ": " + lines + " Zeilen");
+			else assertTrue(lines >= 6 && lines <= 7, tag + ": " + lines + " Zeilen");
+			// Alles steht da, nichts ist mit „…“ gekürzt: Name, jedes Wort, „(bearbeitet)“.
+			StringBuilder drawn = new StringBuilder();
+			for (RecCanvas.Text t : sheetTexts(c, ui)) {
+				if (t.y < row[1] - 0.01 || t.y >= row[1] + lines * 20) continue;
+				assertFalse(t.text.contains("…"), tag + ": gekürzt: " + t);
+				assertTrue(t.x >= row[0] && t.x + t.w - t.scale <= row[0] + row[2], tag + ": ragt über die Zeile: " + t);
+				drawn.append(t.text).append(' ');
+			}
+			String flat = drawn.toString().replace(" ", "");
+			assertEquals((author + ":" + text + label).replace(" ", ""), flat, tag);
+			assertEquals(1, ui.commentsShown, tag);
+			assertNotNull(ui.testSpot("commentReply0"), tag);
+			ui.dispose();
+		}
+	}
+
+	@Test
+	void mentionsAreDrawnInAmber() {
+		ReelsPost p = post("Schaut mal!", host.name, 2, false);
+		reels.comment(p.id, "Steve_Baut", "Hi @" + host.name + " und @Alex! Mail an a@b.de", NOON - 1000);
+		for (PhoneHold hold : PhoneHold.values()) {
+			String tag = hold.toString();
+			PhoneUi ui = comments(hold);
+			RecCanvas c = frame(ui);
+			RecCanvas.Text name = null, own = null, other = null;
+			for (RecCanvas.Text t : sheetTexts(c, ui)) {
+				if (t.text.equals("Steve_Baut: ")) name = t;
+				if (t.text.equals("@" + host.name)) own = t;
+				if (t.text.equals("@Alex")) other = t;
+			}
+			assertNotNull(name, tag + ": " + c.strings());
+			assertNotNull(own, tag + ": " + c.strings());
+			assertNotNull(other, tag + ": " + c.strings());
+			assertEquals(FeedView.AMBER_LIGHT, name.argb, tag + ": der Name des Verfassers");
+			assertEquals(FeedView.AMBER, own.argb, tag);
+			assertEquals(FeedView.AMBER, other.argb, tag);
+			// Der Rest ist weiß – auch die Mail-Adresse.
+			int white = 0;
+			for (RecCanvas.Text t : sheetTexts(c, ui)) {
+				if (t.text.contains("Hi") || t.text.contains("und") || t.text.contains("a@b.de")) {
+					assertEquals(FeedView.WHITE, t.argb, tag + ": " + t);
+					white++;
+				}
+			}
+			assertTrue(white >= 2, tag);
+			// Nur die Erwähnung des eigenen Namens ist hinterlegt.
+			RecCanvas.Fill back = null;
+			int backs = 0;
+			for (RecCanvas.Fill f : c.fills) {
+				if (f.argb != CommentsView.MENTION_BACK) continue;
+				backs++;
+				back = f;
+			}
+			assertEquals(1, backs, tag);
+			assertTrue(back.x1 <= own.x && back.x2 >= own.x + own.w - own.scale && back.y1 <= own.y && back.y2 >= own.y + own.h, tag + ": " + back);
+			assertTrue(back.x2 <= other.x || back.y2 <= other.y || back.y1 >= other.y + other.h, tag + ": die andere bleibt frei");
+			ui.dispose();
+		}
 	}
 }

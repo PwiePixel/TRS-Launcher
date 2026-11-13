@@ -323,6 +323,8 @@ public final class PhoneUi extends UiScreen {
 	private String commentsPostId;
 	/** Blättern in den Kommentaren: so viele Zeilen der Liste sind unten übersprungen. */
 	private final FeedPager commentScroll = new FeedPager();
+	/** ID eines eben gesendeten Kommentars: das nächste Bild blättert so, dass er zu sehen ist. */
+	private String commentReveal;
 	/** Die Kommentare des Posts in Anzeige-Reihenfolge – gerechnet für diesen Feed und diesen Post. */
 	private List<CommentThread.Row> commentRows = Collections.<CommentThread.Row>emptyList();
 	private List<ReelsPost> commentRowsFeed;
@@ -787,6 +789,7 @@ public final class PhoneUi extends UiScreen {
 	private void resetComments() {
 		commentMode = CommentMode.NEW;
 		commentTarget = null;
+		commentReveal = null;
 		setCommentText("");
 		commentScroll.size(1);
 		commentScroll.to(0);
@@ -837,6 +840,19 @@ public final class PhoneUi extends UiScreen {
 	/** Wie weit sich blättern lässt: {@code size} − 1 Zeilen (setzt {@link CommentsView} je Bild). */
 	void commentScrollLimit(int size) {
 		commentScroll.size(Math.max(1, size));
+	}
+
+	/** Auf diese Stelle blättern ({@code size} Zeilen hat die Liste). */
+	void commentScrollTo(int size, int skip) {
+		commentScroll.size(Math.max(1, size));
+		commentScroll.to(skip);
+	}
+
+	/** Der eben gesendete Kommentar, der im nächsten Bild zu sehen sein soll – einmal abgeholt, dann vergessen. */
+	String takeCommentReveal() {
+		String id = commentReveal;
+		commentReveal = null;
+		return id;
 	}
 
 	/** So blättern, dass dieser Kommentar die unterste gezeichnete Zeile ist. */
@@ -930,7 +946,7 @@ public final class PhoneUi extends UiScreen {
 			commentMode = CommentMode.NEW;
 			commentTarget = null;
 			setCommentText("");
-			scrollToComment(current(), done.id);
+			commentReveal = done.id;
 			host.click();
 			return;
 		}
@@ -938,7 +954,7 @@ public final class PhoneUi extends UiScreen {
 		ReelsComment sent = reels.comment(post.id, me, text, now());
 		if (sent == null) return;
 		setCommentText("");
-		scrollToComment(current(), sent.id);
+		commentReveal = sent.id;
 		host.click();
 	}
 
@@ -2033,6 +2049,11 @@ public final class PhoneUi extends UiScreen {
 		if (view != View.COMMENTS) return false;
 		// Die erste Hälfte eines Zeichenpaars (Emoji) nur, wenn auch die zweite noch ins Feld passt.
 		if (Character.isHighSurrogate(ch) && commentInput.text().length() + 2 > ReelsComment.MAX_TEXT) return true;
+		// Und die zweite nur direkt hinter ihrer ersten.
+		if (Character.isLowSurrogate(ch)) {
+			int at = commentInput.cursor();
+			if (at == 0 || !Character.isHighSurrogate(commentInput.text().charAt(at - 1))) return true;
+		}
 		commentInput.type(ch);
 		refreshSuggestions();
 		return true;
