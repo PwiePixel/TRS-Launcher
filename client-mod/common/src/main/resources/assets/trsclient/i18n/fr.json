@@ -2719,5 +2719,12 @@
   "setting.waypoints.sort": "Ordre de la liste",
   "setting.waypoints.sort.distance": "Distance",
   "setting.waypoints.sort.name": "Nom",
-  "setting.waypoints.sort.created": "Récents"
+  "setting.waypoints.sort.created": "Récents",
+  "module.mcReels": "MC-Reels",
+  "module.mcReels.desc": "Sors un téléphone en jeu : fil de photos, appareil photo avec mode selfie, publications avec légende et une série. Première version de test – tout reste sur ce PC.",
+  "setting.mcReels.key": "Ouvrir le téléphone",
+  "setting.mcReels.rotateKey": "Tourner le téléphone",
+  "setting.mcReels.hold": "Tenue",
+  "setting.mcReels.hold.landscape": "Paysage",
+  "setting.mcReels.hold.portrait": "Portrait"
 }

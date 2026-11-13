@@ -2719,5 +2719,12 @@
   "setting.waypoints.sort": "Orden de la lista",
   "setting.waypoints.sort.distance": "Distancia",
   "setting.waypoints.sort.name": "Nombre",
-  "setting.waypoints.sort.created": "Recientes"
+  "setting.waypoints.sort.created": "Recientes",
+  "module.mcReels": "MC-Reels",
+  "module.mcReels.desc": "Saca un móvil en el juego: feed de fotos, cámara con modo selfi, publicaciones con texto y una racha. Primera versión de prueba: todo se queda en este PC.",
+  "setting.mcReels.key": "Abrir el móvil",
+  "setting.mcReels.rotateKey": "Girar el móvil",
+  "setting.mcReels.hold": "Posición",
+  "setting.mcReels.hold.landscape": "Horizontal",
+  "setting.mcReels.hold.portrait": "Vertical"
 }

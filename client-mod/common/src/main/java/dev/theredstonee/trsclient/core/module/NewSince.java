@@ -191,6 +191,8 @@ public final class NewSince {
 	public static final String FRIENDS_WAYPOINTS = "friends:waypoints";
 	/** Weltkarte → Wegpunkt-Liste → Reiter „Freunde“. */
 	public static final String WORLD_MAP_FRIENDS = "worldMap:friends";
+	/** MC-Reels (TRS Client 0.27.0): Handy im Spiel mit Foto-Feed, Kamera und Selfie – vorerst nur Fabric 26.2, lokal. */
+	public static final String REELS = "0.27.0";
 
 	private static final Map<String, String> SINCE = new LinkedHashMap<String, String>();
 	/** Zusatzbereiche je Modul (Modul-ID → Einträge). */
@@ -286,6 +288,8 @@ public final class NewSince {
 		add(WAYPOINTS_2, "waypoints.quickKey", "waypoints.labels", "waypoints.deathKeep", "waypoints.deathGuide", "waypoints.teleport", "waypoints.sort");
 		add(WAYPOINT_LIVE, "waypoints.shareLive", "waypoints.shareDeath", "waypoints.sharePosition", "waypoints.friendWaypoints",
 				"waypoints.friendPositions", FRIENDS_WAYPOINTS, WORLD_MAP_FRIENDS);
+		// MC-Reels (die Einstellungen gibt es seit dem Modul).
+		add(REELS, "mcReels");
 	}
 
 	private NewSince() {

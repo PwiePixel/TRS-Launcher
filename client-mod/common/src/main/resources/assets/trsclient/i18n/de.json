@@ -2719,5 +2719,12 @@
   "setting.waypoints.sort": "Sortierung der Liste",
   "setting.waypoints.sort.distance": "Nähe",
   "setting.waypoints.sort.name": "Name",
-  "setting.waypoints.sort.created": "Neueste"
+  "setting.waypoints.sort.created": "Neueste",
+  "module.mcReels": "MC-Reels",
+  "module.mcReels.desc": "Hol im Spiel dein Handy raus: Foto-Feed, Kamera mit Selfie, Posts mit Text und eine Streak. Erste Testversion – alles bleibt auf diesem PC.",
+  "setting.mcReels.key": "Handy öffnen",
+  "setting.mcReels.rotateKey": "Handy drehen",
+  "setting.mcReels.hold": "Haltung",
+  "setting.mcReels.hold.landscape": "Quer",
+  "setting.mcReels.hold.portrait": "Hochkant"
 }

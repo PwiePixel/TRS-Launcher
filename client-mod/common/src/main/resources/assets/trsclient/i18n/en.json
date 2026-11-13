@@ -2719,5 +2719,12 @@
   "setting.waypoints.sort": "List order",
   "setting.waypoints.sort.distance": "Distance",
   "setting.waypoints.sort.name": "Name",
-  "setting.waypoints.sort.created": "Newest"
+  "setting.waypoints.sort.created": "Newest",
+  "module.mcReels": "MC-Reels",
+  "module.mcReels.desc": "Take out a phone in the game: a photo feed, a camera with selfie mode, posts with a caption and a streak. First test version – everything stays on this PC.",
+  "setting.mcReels.key": "Open phone",
+  "setting.mcReels.rotateKey": "Rotate phone",
+  "setting.mcReels.hold": "Hold",
+  "setting.mcReels.hold.landscape": "Landscape",
+  "setting.mcReels.hold.portrait": "Portrait"
 }

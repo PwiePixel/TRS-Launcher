@@ -2719,5 +2719,12 @@
   "setting.waypoints.sort": "Liste sırası",
   "setting.waypoints.sort.distance": "Mesafe",
   "setting.waypoints.sort.name": "Ad",
-  "setting.waypoints.sort.created": "En yeni"
+  "setting.waypoints.sort.created": "En yeni",
+  "module.mcReels": "MC-Reels",
+  "module.mcReels.desc": "Oyunda telefonunu çıkar: fotoğraf akışı, selfie modlu kamera, açıklamalı gönderiler ve bir seri. İlk test sürümü – her şey bu bilgisayarda kalır.",
+  "setting.mcReels.key": "Telefonu aç",
+  "setting.mcReels.rotateKey": "Telefonu döndür",
+  "setting.mcReels.hold": "Tutuş",
+  "setting.mcReels.hold.landscape": "Yatay",
+  "setting.mcReels.hold.portrait": "Dikey"
 }

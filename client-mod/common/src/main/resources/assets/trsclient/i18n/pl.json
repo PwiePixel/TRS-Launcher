@@ -2719,5 +2719,12 @@
   "setting.waypoints.sort": "Kolejność listy",
   "setting.waypoints.sort.distance": "Odległość",
   "setting.waypoints.sort.name": "Nazwa",
-  "setting.waypoints.sort.created": "Najnowsze"
+  "setting.waypoints.sort.created": "Najnowsze",
+  "module.mcReels": "MC-Reels",
+  "module.mcReels.desc": "Wyjmij w grze telefon: kanał zdjęć, aparat z trybem selfie, posty z podpisem i seria. Pierwsza wersja testowa – wszystko zostaje na tym komputerze.",
+  "setting.mcReels.key": "Otwórz telefon",
+  "setting.mcReels.rotateKey": "Obróć telefon",
+  "setting.mcReels.hold": "Chwyt",
+  "setting.mcReels.hold.landscape": "Poziomo",
+  "setting.mcReels.hold.portrait": "Pionowo"
 }

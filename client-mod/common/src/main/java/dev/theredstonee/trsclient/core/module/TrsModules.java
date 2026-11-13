@@ -113,6 +113,8 @@ public final class TrsModules {
 	public final HalloweenModules halloween;
 	/** Minispiele: Redstone-Stapler und Loren-Rausch. */
 	public final MinigameModules minigames;
+	/** MC-Reels: Handy im Spiel mit Foto-Feed und Kamera (vorerst nur Fabric 26.2). */
+	public final ReelsModules reels;
 	/** Server-Profile (automatischer Wechsel je Server; nach den HUD-Profilen gelesen/geschrieben). */
 	public final dev.theredstonee.trsclient.core.profile.ServerProfiles serverProfiles;
 
@@ -1027,6 +1029,7 @@ public final class TrsModules {
 		cinematic = new CinematicModules(registry);
 		halloween = new HalloweenModules(registry);
 		minigames = new MinigameModules(registry);
+		reels = new ReelsModules(registry);
 
 		registry.addPart(keyDefaults);
 		registry.addPart(perfUndo);
