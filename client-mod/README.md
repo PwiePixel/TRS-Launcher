@@ -73,6 +73,7 @@ All features can be toggled in the TRS menu. Settings are stored in `config/trsc
 | Welt-Details | Sky, stars, distance fog, rain/snow and texture animations (water, lava, fire …) off – each only where the version has a clean hook |
 | Clips & Aufnahme | **F9** saves the last seconds as a clip, **F10** starts/stops a recording (both changeable in the vanilla controls). The TRS Launcher records the game window – the mod only reports the key presses over a local link (see below). HUD element (movable): a subtle ring while the clip buffer runs (*Show buffer indicator*), "Clip saved (30 s)" for a few seconds – with a current TRS Launcher both (and the REC timer) appear in the launcher's overlay instead, so they never end up in a clip. Without the TRS Launcher (or with clips off there) the keys only show a hint |
 | Startbildschirm | TRS title screen: animated redstone circuit on deepslate, glowing pixel wordmark, buttons as redstone lamps (Einzelspieler/Mehrspieler/Einstellungen/TRS-Menü/Mods*/Beenden; keyboard: Tab/arrows + Enter, narrated where the version has a narrator); link "Klassischer Titelbildschirm"; setting *Animierter Hintergrund* switches to a still image; disable the module to always get the vanilla one. Servers are only reached through Mehrspieler |
+| MC-Reels | First test version, **Fabric 26.2 only**, off by default: **K** takes out a phone held by two arms drawn from your own skin (always the same size on screen, independent of the GUI scale; the vanilla hand, the block outline, the crosshair and the TRS HUD rest while it is out, the hotbar stays). On the phone: a photo feed with likes, comments and a streak, a camera ("Foto" / "Selfie") and posting with a caption. Photos never contain HUD, chat, phone or arms. **R** turns the phone (landscape/portrait). No server and no network: feed and photos stay in `config/trsclient/reels` (`feed.json`, `photos/`), which the launcher never puts into an exported modpack. See "MC-Reels" below |
 
 *Mods only if ModMenu is installed. The TRS menu also has a **Resourcepacks** screen (search, filter all/enabled/available,
 toggle, priority ▲/▼, open folder; applied with one reload).
@@ -477,6 +478,10 @@ rebound in the TRS menu, not in the vanilla controls screen. Zoom and freelook a
 row in the TRS menu is linked to the same binding (`KeySetting.link`, stored in `options.txt`), so both places show
 and change one key.
 
+MC-Reels (Fabric 26.2): **K** takes out the phone and puts it away again, **R** turns it while it is out. Both are module
+keys too, changed in the TRS menu. K is the default because H already belongs to the Circuit Library ("Hide / show
+template").
+
 
 ## Languages
 
@@ -514,6 +519,32 @@ dust power, vanilla `getSignal`/direct signal, comparator input override, conduc
 one identical file for the Mojmap trees (1.14.4–26.3; the only branch is `getAnalogOutputSignal` with a direction from
 1.21.9), block IDs + state property names for Forge 1.8.9–1.12.2, block + metadata for 1.7.10, MCP names for 1.13.2.
 Fair on every server: only block states the client already has are read, nothing is sent.
+
+## MC-Reels
+
+First test version, **Fabric 26.2 only**: a phone in the game with a local photo feed. Module `mcReels` (MISC, off by default,
+NEW badge 0.27.0). Everything that can be version independent is in `common` (`core/reels`: store, photo crop, geometry;
+`core/ui/reels`: the phone as a `UiScreen`); the Fabric tree adds only `reels/ReelsHooks`, `screen/ReelsScreen`, two mixins
+and the self-test, all inside `//? if >=26.2 && <26.3`. On every other version the tile is hidden.
+
+- **Look:** two arms from the player's skin (always 4 pixels wide, also for slim skins; sleeve layer as in the skin options)
+  hold the phone. Sizes come from the window only (`PhoneLayout`, `ArmRig`), never from the GUI scale, and the arm ends are
+  always below the bottom window edge. While the phone is out there is no vanilla hand, no block outline and no crosshair; the
+  TRS HUD (minimap included) rests, the vanilla hotbar stays. The phone exists only in first person: a third-person view chosen
+  with F5 comes back afterwards, one held by freelook or the emote camera is left to that feature, and during a camera ride
+  the phone stays in the pocket.
+- **Feed:** likes, comments (Enter), paging with the mouse wheel or the arrow keys, streak (days in a row with a post).
+- **Camera:** the frame is read directly before Minecraft draws its GUI, so a photo can never contain HUD, chat, phone or arms.
+  "Selfie" turns the game camera to the player for the viewfinder and the photo; behind the phone the last normal view stays
+  (a GPU copy laid back over the world before the GUI is drawn), so the own model never stands between the drawn arms. Photos
+  are 16:9 or 9:16 crops, at most 1280 px long, never upscaled. A photo that is not posted is deleted again.
+- **Data:** `config/trsclient/reels/feed.json` and `config/trsclient/reels/photos/<id>.png`. No network code. The launcher
+  never exports `config/trsclient`. In a second window of the same instance nothing is written, so the camera takes no photo there.
+- **Servers:** the id `mcReels` can be locked with TRS Server Rules.
+
+Self-test: `-PtrsAutotestOnly=reels` (fabric 26.2 only; own feed folder with `-PtrsSys.trsclient.reels.dir=<folder in the game
+dir>`): both holds, GUI scales 1/2/4, several window sizes, feed, like, comment, camera, selfie, posting, closing; screenshots
+`trsclient-26.2-reels-*.png` plus the two posted photos, results in the log under `[Autotest] Reels`.
 
 ## Minigames
 
@@ -609,6 +640,7 @@ vanilla toggle sprint/sneak only exists from 1.15.
 | Screenshot-Werkzeuge: Chat-Aktionen, Bild über der Chatzeile | Fabric/Forge 1.14.4–1.15.2, Forge 1.13.2 and 1.7.10 | no style insertion hook (<1.16) / not ported; preview, editor, favourites work |
 | Screenshot-Vorschau: Klick | Forge 1.14.4 | no Mixin – the preview shows, open the editor from Clips & Images |
 | Screenshot-Werkzeuge: Link kopieren, An Freunde senden | Forge 1.13.2 and 1.7.10 | no TRS Online there – buttons say "not available in this version" |
+| MC-Reels | everything except Fabric 26.2 | first test version – hidden in the menu there (`ReelsModules.platformSupported` is only set by the Fabric 26.2 tree) |
 | Bewegungsunschärfe | all | not implemented (see "Open") – copying the frame needs a different path per render era |
 
 ### Open
