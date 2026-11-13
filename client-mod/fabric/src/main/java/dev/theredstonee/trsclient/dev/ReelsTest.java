@@ -21,8 +21,10 @@ import dev.theredstonee.trsclient.core.ui.UiKey;
 import dev.theredstonee.trsclient.core.ui.reels.PhoneUi;
 import dev.theredstonee.trsclient.core.wardrobe.PngWriter;
 import dev.theredstonee.trsclient.reels.ReelsHooks;
+import com.mojang.blaze3d.vertex.PoseStack;
 import net.minecraft.client.CameraType;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.renderer.SubmitNodeStorage;
 import net.minecraft.server.MinecraftServer;
 
 import java.io.IOException;
@@ -208,6 +210,14 @@ public final class ReelsTest {
 			case 6: {
 				check("Handy ist offen", ReelsHooks.phoneOpen());
 				check("Haken für die Spielerhand greift (renderItemInHand)", ReelsHooks.handHookSeen());
+				// Der Arm wurde vor dem Öffnen normal gezeichnet – dabei kam der tiefere Haken vorbei (mit Iris der einzige).
+				check("Haken für Arm und Gegenstand greift (submitArmWithItem)", ReelsHooks.armHookSeen());
+				// Der Weg von Iris mit Shaderpaket: submitHandsWithItems direkt, an renderItemInHand vorbei. Bei offenem
+				// Handy muss der Arm trotzdem wegbleiben (eingereicht wird in einen Wegwerf-Speicher).
+				int hiddenBefore = ReelsHooks.armsHidden();
+				mc.gameRenderer.itemInHandRenderer.submitHandsWithItems(1f, new PoseStack(), new SubmitNodeStorage(), mc.player, 0xF000F0);
+				check("Hand bleibt auch auf dem direkten Weg weg, den Iris nimmt (submitHandsWithItems)",
+						ReelsHooks.armsHidden() > hiddenBefore);
 				check("Haken für den Block-Umriss greift (shouldRenderBlockOutline)", ReelsHooks.outlineHookSeen());
 				int[] phone = ui.testSpot("phone");
 				int w = Mc.window().getWidth();

@@ -65,6 +65,8 @@ public final class ReelsHooks {
 	/^* Vom Spieler gewählte Außenansicht vor dem Öffnen bzw. währenddessen; null = nichts zurückzustellen. *^/
 	private static CameraType viewBefore;
 	private static boolean handHookSeen;
+	private static boolean armHookSeen;
+	private static int armsHidden;
 	private static boolean outlineHookSeen;
 	private static boolean frameHookSeen;
 	private static boolean cameraHookSeen;
@@ -241,6 +243,17 @@ public final class ReelsHooks {
 	public static boolean hideHand() {
 		handHookSeen = true;
 		return phoneOpen();
+	}
+
+	/^*
+	 * Dasselbe eine Stufe tiefer (ReelsHandMixin): Arm und Gegenstand je Hand. Hier kommt auch die Hand vorbei, die
+	 * Iris mit einem Shaderpaket selbst zeichnet – an {@code GameRenderer#renderItemInHand} vorbei.
+	 *^/
+	public static boolean hideArm() {
+		armHookSeen = true;
+		if (!phoneOpen()) return false;
+		armsHidden++;
+		return true;
 	}
 
 	/^* Kein Block-Umriss hinter dem Handy (und später auf keinem Foto). *^/
@@ -430,6 +443,16 @@ public final class ReelsHooks {
 	/^* Hat der Haken der Hand schon einmal gegriffen (sonst fehlt er, z. B. wegen einer anderen Mod)? *^/
 	public static boolean handHookSeen() {
 		return handHookSeen;
+	}
+
+	/^* Hat der tiefere Haken der Hand (je Arm, auch für Iris) schon einmal gegriffen? *^/
+	public static boolean armHookSeen() {
+		return armHookSeen;
+	}
+
+	/^* Wie oft der tiefere Haken einen Arm tatsächlich weggelassen hat (Handy draußen). *^/
+	public static int armsHidden() {
+		return armsHidden;
 	}
 
 	public static boolean outlineHookSeen() {
