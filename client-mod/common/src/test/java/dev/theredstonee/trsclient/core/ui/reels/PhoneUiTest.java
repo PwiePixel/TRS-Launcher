@@ -4,13 +4,20 @@ import dev.theredstonee.trsclient.core.i18n.I18n;
 import dev.theredstonee.trsclient.core.module.TrsModules;
 import dev.theredstonee.trsclient.core.reels.ArmRig;
 import dev.theredstonee.trsclient.core.reels.ArmSkin;
+import dev.theredstonee.trsclient.core.reels.FeedFilter;
+import dev.theredstonee.trsclient.core.reels.FeedSort;
 import dev.theredstonee.trsclient.core.reels.LocalReelsBackend;
 import dev.theredstonee.trsclient.core.reels.PhoneHold;
 import dev.theredstonee.trsclient.core.reels.PhoneLayout;
 import dev.theredstonee.trsclient.core.reels.Reels;
 import dev.theredstonee.trsclient.core.reels.ReelsBackend;
 import dev.theredstonee.trsclient.core.reels.ReelsComment;
+import dev.theredstonee.trsclient.core.reels.ReelsExport;
+import dev.theredstonee.trsclient.core.reels.ReelsMeta;
 import dev.theredstonee.trsclient.core.reels.ReelsPost;
+import dev.theredstonee.trsclient.core.reels.ReelsTime;
+import dev.theredstonee.trsclient.core.reels.StreakGuard;
+import dev.theredstonee.trsclient.core.screenshot.ImageClipboard;
 import dev.theredstonee.trsclient.core.ui.Canvas;
 import dev.theredstonee.trsclient.core.ui.TextureRef;
 import dev.theredstonee.trsclient.core.ui.Textures;
@@ -27,6 +34,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Deque;
 import java.util.HashSet;
 import java.util.List;
@@ -34,7 +42,9 @@ import java.util.Set;
 import java.util.TimeZone;
 import java.util.UUID;
 import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionException;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -44,7 +54,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * Das MC-Reels-Handy ohne Spiel: zeichnen in Fensterpixeln bei jeder GUI-Skalierung, Arme aus dem Skin (breit, schlank,
  * Innenseite, Ärmel), Texte bleiben auf dem Bildschirm des Handys, Feed blättern, Herz, Kommentare, Drehen, Schließen
- * und Aufräumen.
+ * und Aufräumen. Dazu die Blätter „Bild“ (speichern, kopieren, Ordner öffnen), „Feed“ (Filter und Reihenfolge) und
+ * „Streak“ (Streak-Schutz) und die Marken am Post. Zwischenablage und Dateimanager des Systems fasst kein Test an: beides
+ * geht über {@link FakeHost}.
  */
 class PhoneUiTest {
 	private static final TimeZone UTC = TimeZone.getTimeZone("UTC");
@@ -444,6 +456,58 @@ class PhoneUiTest {
 		public void close() {
 			closes++;
 		}
+
+		// --- Bild speichern, Marken, Filter: nichts davon erreicht das echte System ---
+		/** Screenshots-Ordner des „Spiels“ (null: der Baum kennt keinen). */
+		Path screenshots;
+		/** Ordner, die „im Dateimanager gezeigt“ wurden, und ob das klappt. */
+		final List<Path> opened = new ArrayList<Path>();
+		boolean openOk = true;
+		/** Bilder, die „in die Zwischenablage kopiert“ wurden, und was das „System“ dazu sagt. */
+		final List<Path> copied = new ArrayList<Path>();
+		ImageClipboard.Result copyResult = ImageClipboard.Result.OK;
+		/** Womit das „Spiel“ läuft (null: unbekannt). */
+		ReelsMeta meta;
+		/** Namen der Freunde (null: unbekannt) und wie oft danach gefragt wurde. */
+		Collection<String> friends;
+		int friendCalls;
+		/** Spieler auf dem „Server“ und wie oft danach gefragt wurde. */
+		List<String> online = new ArrayList<String>();
+		int onlineCalls;
+
+		@Override
+		public Path screenshotsDir() {
+			return screenshots;
+		}
+
+		@Override
+		public boolean openFolder(Path dir) {
+			opened.add(dir);
+			return openOk;
+		}
+
+		@Override
+		public ImageClipboard.Result copyImage(Path png) {
+			copied.add(png);
+			return copyResult;
+		}
+
+		@Override
+		public ReelsMeta photoMeta() {
+			return meta;
+		}
+
+		@Override
+		public Collection<String> friendNames() {
+			friendCalls++;
+			return friends;
+		}
+
+		@Override
+		public List<String> onlinePlayers() {
+			onlineCalls++;
+			return online;
+		}
 	}
 
 	/** Texturen-Ablage, die Hochladen und Freigeben zählt. */
@@ -497,6 +561,7 @@ class PhoneUiTest {
 		modules = new TrsModules();
 		backend = new LocalReelsBackend(tmp, UTC);
 		reels = Reels.forTest(modules, backend, DIRECT, UTC);
+		host.screenshots = tmp.resolve("screenshots");
 	}
 
 	@AfterEach
@@ -617,10 +682,14 @@ class PhoneUiTest {
 		// Kleine Bilder der „Welt“, damit die vielen Fotos dieses Tests schnell gespeichert sind.
 		host.frameW = 320;
 		host.frameH = 180;
-		ReelsPost old = post("Aussicht hinter meiner Basis – und ein ziemlich langer Text dazu, der umbrechen muss!", "Rotkaeppchen_2010",
-				30, true);
-		ReelsPost top = post("Schaut mal, wer bei mir eingezogen ist! Der Panda bleibt jetzt für immer hier bei mir.", host.name, 2,
-				false);
+		// Beide Posts tragen alle Angaben, mit den längsten Namen, die gespeichert werden (40 und 64 Zeichen).
+		host.meta = new ReelsMeta("26.2", "fabric", null, null);
+		long oldAt = NOON - 30 * 3600000L;
+		ReelsPost old = backend.post(ReelsPost.newId(oldAt, UTC, ++salt) + ".png", 608, 1080, true, false,
+				"Aussicht hinter meiner Basis – und ein ziemlich langer Text dazu, der umbrechen muss!", "Rotkaeppchen_2010", oldAt,
+				new ReelsMeta("1.21.4", "neoforge", chars(40), chars(64)));
+		ReelsPost top = postMeta("Schaut mal, wer bei mir eingezogen ist! Der Panda bleibt jetzt für immer hier bei mir.", host.name, 2,
+				new ReelsMeta("26.2", "fabric", chars(40), chars(64)));
 		reels.comment(top.id, "Rotkaeppchen_2010", "Wie süß! Den will ich auch haben, wo hast du den denn gefunden?", NOON - 1000);
 		reels.comment(top.id, host.name, "Im Bambuswald hinter dem Dorf.", NOON - 500);
 		reels.comment(old.id, "Du", "Schön.", NOON - 100);
@@ -642,6 +711,29 @@ class PhoneUiTest {
 					ui.mouseScrolled(0, 0, -1);
 					assertEquals(1, ui.testPage(), tag);
 					onScreen(frame(ui), ui, tag + " Seite 2");
+					// Die Blätter „Bild“ und „Feed“, eine der neuen Meldungen, und der Feed, wenn der Filter nichts zeigt.
+					ui.openSheet(PhoneUi.Sheet.SAVE);
+					assertEquals(PhoneUi.Sheet.SAVE, ui.testSheet(), tag);
+					onScreen(frame(ui), ui, tag + " Blatt Bild");
+					ui.toast(I18n.tr("reels.toast.copied"));
+					onScreen(frame(ui), ui, tag + " Blatt Bild mit Meldung");
+					ui.openSheet(PhoneUi.Sheet.FILTER);
+					onScreen(frame(ui), ui, tag + " Blatt Feed");
+					ui.setFilter(FeedFilter.FRIENDS);
+					ui.setSort(FeedSort.POPULAR);
+					onScreen(frame(ui), ui, tag + " Blatt Feed, Freunde");
+					ui.closeSheet();
+					onScreen(frame(ui), ui, tag + " Freunde leer");
+					String me = host.name;
+					host.name = "Niemand";
+					ui.setFilter(FeedFilter.MINE);
+					onScreen(frame(ui), ui, tag + " Ich leer");
+					host.name = me;
+					ui.setFilter(FeedFilter.ALL);
+					ui.setSort(FeedSort.NEWEST);
+					ui.openSheet(PhoneUi.Sheet.STREAK);
+					onScreen(frame(ui), ui, tag + " Blatt Streak");
+					ui.closeSheet();
 					// Kamera (Foto und Selfie) und „Neuer Post“ mit langem Text.
 					ui.testTicker = 5000;
 					ui.openCamera();
@@ -673,6 +765,60 @@ class PhoneUiTest {
 					host.size(win[0], win[1], 2);
 					PhoneUi ui = ui(hold);
 					onScreen(frame(ui), ui, lang + " " + hold + " " + win[0] + "x" + win[1] + " leer");
+					ui.dispose();
+				}
+			}
+		}
+		noneOffScreen();
+		// Streak-Schutz: beide Knöpfe (gestern lässt sich retten), die Nachfrage, die Meldung beim Herausholen und die
+		// zurückgestellte Uhr.
+		backend = new LocalReelsBackend(tmp.resolve("retten"), UTC);
+		reels = Reels.forTest(modules, backend, DIRECT, UTC);
+		for (int hours : new int[]{98, 74, 50, 2}) post("Tag", host.name, hours, false);
+		for (String lang : LANGUAGES) {
+			I18n.use(lang);
+			for (int[] win : windows) {
+				for (PhoneHold hold : PhoneHold.values()) {
+					host.size(win[0], win[1], 2);
+					String tag = lang + " " + hold + " " + win[0] + "x" + win[1];
+					PhoneUi ui = ui(hold);
+					ui.testTicker = 5000;
+					ui.toast(I18n.tr("reels.toast.streak.rescuable"));
+					onScreen(frame(ui), ui, tag + " Meldung Retten");
+					ui.openStreakSheet();
+					assertTrue(ui.testStreakGuard().canRescueYesterday, tag);
+					onScreen(frame(ui), ui, tag + " Streak retten");
+					ui.useProtection(true, false);
+					assertEquals(2, ui.streakArmed(), tag);
+					onScreen(frame(ui), ui, tag + " Streak Nachfrage");
+					ui.dispose();
+					PhoneUi back = ui(hold);
+					back.testNow = NOON - 5 * 86400000L;
+					back.testTicker = 5000;
+					frame(back);
+					back.openStreakSheet();
+					assertTrue(back.testStreakGuard().clockBehind, tag);
+					onScreen(frame(back), back, tag + " Streak Uhr");
+					back.dispose();
+				}
+			}
+		}
+		noneOffScreen();
+		// Gestern fehlt, aber der Monat ist aufgebraucht.
+		backend = new LocalReelsBackend(tmp.resolve("verpasst"), UTC);
+		reels = Reels.forTest(modules, backend, DIRECT, UTC);
+		useBothProtections();
+		for (String lang : LANGUAGES) {
+			I18n.use(lang);
+			for (int[] win : windows) {
+				for (PhoneHold hold : PhoneHold.values()) {
+					host.size(win[0], win[1], 2);
+					PhoneUi ui = ui(hold);
+					frame(ui);
+					ui.openStreakSheet();
+					StreakGuard g = ui.testStreakGuard();
+					assertTrue(g.rescueOffered && g.leftForYesterday == 0, lang + " " + hold);
+					onScreen(frame(ui), ui, lang + " " + hold + " " + win[0] + "x" + win[1] + " Streak verpasst");
 					ui.dispose();
 				}
 			}
@@ -2503,5 +2649,1818 @@ class PhoneUiTest {
 			assertEquals(PhoneBody.SCREEN, last.argb);
 			assertEquals(l.screenW, last.x2 - last.x1, 1e-6);
 		}
+	}
+
+	// --- Hilfen für die Blätter (Bild, Feed, Streak) und die Marken ---
+
+	/** Handy im Feed: erstes Bild gezeichnet, fester Taktgeber. */
+	private PhoneUi feed(PhoneHold hold) {
+		PhoneUi ui = ui(hold);
+		ui.testTicker = 5000;
+		frame(ui);
+		return ui;
+	}
+
+	private int[] spot(PhoneUi ui, String name) {
+		int[] r = ui.testSpot(name);
+		assertNotNull(r, "Stelle fehlt: " + name);
+		return r;
+	}
+
+	/** Stelle relativ zum Bildschirm des Handys: {x, y, Breite, Höhe}. */
+	private int[] onPhone(PhoneUi ui, String name) {
+		int[] r = spot(ui, name);
+		int[] s = spot(ui, "screen");
+		return new int[]{r[0] - s[0], r[1] - s[1], r[2], r[3]};
+	}
+
+	private static boolean overlap(int[] a, int[] b) {
+		return a[0] < b[0] + b[2] && b[0] < a[0] + a[2] && a[1] < b[1] + b[3] && b[1] < a[1] + a[3];
+	}
+
+	private static boolean inside(int[] inner, int[] outer) {
+		return inner[0] >= outer[0] && inner[1] >= outer[1] && inner[0] + inner[2] <= outer[0] + outer[2]
+				&& inner[1] + inner[3] <= outer[1] + outer[3];
+	}
+
+	/** Alle Texte des Bildes hintereinander (umbrochene Sätze stehen so wieder in einem Stück da). */
+	private static String all(RecCanvas c) {
+		StringBuilder sb = new StringBuilder();
+		for (String s : c.strings()) sb.append(s).append(' ');
+		return sb.toString();
+	}
+
+	private static RecCanvas.Text textOf(RecCanvas c, String text) {
+		for (RecCanvas.Text t : c.texts) if (t.text.equals(text)) return t;
+		return null;
+	}
+
+	/** Die Dateien, die im Screenshots-Ordner liegen. */
+	private List<String> screenshots() {
+		List<String> names = new ArrayList<String>();
+		java.io.File[] files = host.screenshots.toFile().listFiles();
+		if (files != null) for (java.io.File f : files) names.add(f.getName());
+		return names;
+	}
+
+	/** Post ohne Foto-Datei, mit Angaben, womit er aufgenommen wurde. */
+	private ReelsPost postMeta(String caption, String author, int hoursAgo, ReelsMeta meta) {
+		long at = NOON - hoursAgo * 3600000L;
+		ReelsPost p = backend.post(ReelsPost.newId(at, UTC, ++salt) + ".png", 1280, 720, false, false, caption, author, at, meta);
+		assertNotNull(p);
+		return p;
+	}
+
+	private static String chars(int n) {
+		StringBuilder sb = new StringBuilder();
+		for (int i = 0; i < n; i++) sb.append((char) ('a' + i % 26));
+		return sb.toString();
+	}
+
+	/** Zweites Spielfenster: derselbe Feed, aber nichts wird gesichert. */
+	private ReelsBackend secondWindow(final LocalReelsBackend real) {
+		return new ReelsBackend() {
+			@Override public List<ReelsPost> feed() { return real.feed(); }
+			@Override public ReelsPost post(String f, int w, int h, boolean p, boolean s, String c, String a, long n) { return null; }
+			@Override public boolean toggleLike(String id) { return real.toggleLike(id); }
+			@Override public ReelsComment comment(String id, String a, String t, long n) { return real.comment(id, a, t, n); }
+			@Override public int streak(long n) { return real.streak(n); }
+			@Override public int streakAfterPost(long n) { return real.streakAfterPost(n); }
+			@Override public Path photoFile(ReelsPost p) { return real.photoFile(p); }
+			@Override public Path newPhotoFile(String id) { return real.newPhotoFile(id); }
+			@Override public void flush() { }
+			@Override public boolean readOnly() { return true; }
+			@Override public StreakGuard streakGuard(long n) {
+				Set<Long> days = new HashSet<Long>();
+				for (ReelsPost p : real.feed()) days.add(Long.valueOf(ReelsTime.epochDay(p.createdAt, 0)));
+				long today = ReelsTime.epochDay(n, 0);
+				return StreakGuard.of(days, null, today, today, true);
+			}
+			@Override public StreakGuard.Result protect(boolean yesterday, long n) { return StreakGuard.Result.READ_ONLY; }
+		};
+	}
+
+	/** Hintergrund-Thread, der auf Wunsch nichts mehr annimmt. */
+	private static final class Gate implements Executor {
+		boolean reject;
+
+		@Override
+		public void execute(Runnable r) {
+			if (reject) throw new RejectedExecutionException("zu");
+			r.run();
+		}
+	}
+
+	// --- A: Bild speichern, kopieren, Ordner öffnen ---
+
+	@Test
+	void saveButtonSitsUnderCommentInBothHoldsAndIsAtLeastFortyPixels() {
+		post("Schaut mal!", host.name, 2, false);
+		// Quer: Herz, Kommentar, Speichern, Kamera, Drehen – genau die Rechtecke des Bauplans.
+		PhoneUi ui = feed(PhoneHold.LANDSCAPE);
+		assertArrayEquals(new int[]{938, 45, 101, 103}, onPhone(ui, "heart"));
+		assertArrayEquals(new int[]{938, 163, 101, 103}, onPhone(ui, "comment"));
+		assertArrayEquals(new int[]{938, 281, 101, 50}, onPhone(ui, "save"));
+		assertArrayEquals(new int[]{948, 351, 81, 55}, onPhone(ui, "camera"));
+		assertArrayEquals(new int[]{938, 426, 101, 55}, onPhone(ui, "rotate"));
+		int[] save = spot(ui, "save");
+		assertTrue(save[1] + save[3] <= spot(ui, "camera")[1], "quer: über dem Kamera-Knopf");
+		ui.dispose();
+
+		ui = feed(PhoneHold.PORTRAIT);
+		assertArrayEquals(new int[]{311, 489, 70, 76}, onPhone(ui, "heart"));
+		assertArrayEquals(new int[]{311, 578, 70, 76}, onPhone(ui, "comment"));
+		assertArrayEquals(new int[]{311, 667, 70, 56}, onPhone(ui, "save"));
+		save = spot(ui, "save");
+		assertTrue(save[1] + save[3] <= spot(ui, "home")[1], "hochkant: über der Leiste");
+		ui.dispose();
+
+		for (PhoneHold hold : PhoneHold.values()) {
+			ui = feed(hold);
+			int[] comment = spot(ui, "comment");
+			save = spot(ui, "save");
+			assertTrue(save[1] >= comment[1] + comment[3], hold + ": unter den Kommentaren");
+			assertTrue(save[2] >= 40 && save[3] >= 40, hold + ": mindestens 40 Pixel: " + save[2] + "x" + save[3]);
+			assertTrue(inside(save, spot(ui, "screen")), hold + ": auf dem Bildschirm");
+			assertFalse(overlap(save, spot(ui, "heart")) || overlap(save, comment), hold + ": überlappt nichts");
+			ui.dispose();
+		}
+	}
+
+	@Test
+	void saveIconIsSmallInLandscapeAndHeartSizedInPortrait() {
+		post("Schaut mal!", host.name, 2, false);
+		for (PhoneHold hold : PhoneHold.values()) {
+			PhoneLayout l = PhoneLayout.of(host.w, host.h, hold);
+			int size = hold == PhoneHold.LANDSCAPE ? l.px(4) : l.px(6);
+			PhoneUi ui = ui(hold);
+			RecCanvas c = frame(ui);
+			int[] save = spot(ui, "save");
+			int pad = Math.max(1, Math.round(8 * l.q));
+			assertEquals(PhoneIcons.height(PhoneIcons.SAVE, size) + pad, save[3], hold + ": nur das Symbol, keine Zahl");
+			// Die oberste Zeile des Symbols: drei Symbol-Pixel breit, mittig in der Spalte.
+			double cx = save[0] + save[2] / 2.0;
+			RecCanvas.Fill top = null;
+			for (RecCanvas.Fill f : c.fills) {
+				if (f.argb == FeedView.WHITE && Math.abs(f.y1 - (save[1] + pad / 2)) < 0.01 && Math.abs((f.x1 + f.x2) / 2 - cx) <= 1.0) top = f;
+			}
+			assertNotNull(top, hold + ": das Symbol steht in seiner Klickfläche");
+			assertEquals(3 * size, top.x2 - top.x1, 0.01, hold.toString());
+			if (hold == PhoneHold.LANDSCAPE) assertEquals(PhoneIcons.height(PhoneIcons.FLIP, l.px(4)) / 9, size, "quer klein wie „Drehen“");
+			else assertEquals(l.px(6), size, "hochkant so groß wie das Herz");
+			ui.dispose();
+		}
+	}
+
+	@Test
+	void noSaveButtonWithoutAPost() {
+		PhoneUi ui = feed(PhoneHold.LANDSCAPE);
+		assertNull(ui.testSpot("save"), "leerer Feed: kein Speichern-Knopf");
+		assertNotNull(ui.testSpot("camera"));
+		ui.openSheet(PhoneUi.Sheet.SAVE);
+		assertEquals(PhoneUi.Sheet.NONE, ui.testSheet(), "ohne Post kein Blatt „Bild“");
+		ui.dispose();
+		// Der Filter zeigt nichts: auch dann nicht.
+		post("Von mir", host.name, 2, false);
+		modules.reels.feedFilter.set(FeedFilter.FRIENDS);
+		for (PhoneHold hold : PhoneHold.values()) {
+			ui = feed(hold);
+			assertNull(ui.testSpot("save"), hold.toString());
+			assertNull(ui.testSpot("heart"), hold.toString());
+			ui.dispose();
+		}
+	}
+
+	@Test
+	void saveSheetOpensSavesToastsAndCloses() throws IOException {
+		ReelsPost p = postWithPhoto(160, 90, 1);
+		for (PhoneHold hold : PhoneHold.values()) {
+			PhoneUi ui = feed(hold);
+			int clicks = host.clicks;
+			click(ui, "save");
+			assertEquals(PhoneUi.Sheet.SAVE, ui.testSheet(), hold.toString());
+			assertEquals(clicks + 1, host.clicks, "Klick-Ton");
+			RecCanvas c = frame(ui);
+			for (String s : new String[]{"saveSheet", "saveBack", "saveClose", "saveDo", "saveCopy", "saveFolder"}) spot(ui, s);
+			assertTrue(c.strings().contains(I18n.tr("reels.save.title")), c.strings().toString());
+			assertTrue(c.shows(I18n.tr("reels.save.do")) && c.shows(I18n.tr("reels.save.copy")) && c.shows(I18n.tr("reels.save.folder")));
+			assertTrue(all(c).contains(I18n.tr("reels.save.hint")), "der Hinweis steht ganz da: " + c.strings());
+			for (String s : new String[]{"saveDo", "saveCopy", "saveFolder"}) {
+				assertTrue(spot(ui, s)[3] >= 40, s + " mindestens 40 Pixel hoch");
+				assertTrue(inside(spot(ui, s), spot(ui, "saveSheet")), s + " liegt auf dem Blatt");
+			}
+			// Das Blatt ist niedriger als das Kommentar-Blatt.
+			PhoneLayout l = PhoneLayout.of(host.w, host.h, hold);
+			assertTrue(spot(ui, "saveSheet")[3] < Math.round((hold == PhoneHold.LANDSCAPE ? 290 : 400) * l.q), hold.toString());
+			// Ein Klick auf das Blatt selbst trifft nichts darunter.
+			int[] sheet = spot(ui, "saveSheet");
+			ui.inputClick((sheet[0] + 2.0) / host.gui, (sheet[1] + sheet[3] - 2.0) / host.gui, 0);
+			assertEquals(PhoneUi.Sheet.SAVE, ui.testSheet());
+
+			click(ui, "saveDo");
+			frame(ui);
+			String name = ReelsExport.fileName(p.id, 1);
+			assertEquals(java.util.Collections.singletonList(name), screenshots(), hold + ": genau eine Datei");
+			assertTrue(java.util.Arrays.equals(Files.readAllBytes(backend.photoFile(p)), Files.readAllBytes(host.screenshots.resolve(name))),
+					"dieselben Bytes wie das Foto");
+			assertEquals(hold == PhoneHold.LANDSCAPE ? I18n.tr("reels.toast.saved") : I18n.tr("reels.toast.saved.already"), ui.testToast());
+			assertEquals(PhoneUi.Sheet.NONE, ui.testSheet(), "nach dem Speichern ist das Blatt zu");
+			assertFalse(ui.testSheetBusy());
+			// X und ein Klick auf das abgedunkelte Foto schließen auch.
+			click(ui, "save");
+			frame(ui);
+			click(ui, "saveClose");
+			assertEquals(PhoneUi.Sheet.NONE, ui.testSheet());
+			frame(ui);
+			click(ui, "save");
+			frame(ui);
+			click(ui, "saveBack");
+			assertEquals(PhoneUi.Sheet.NONE, ui.testSheet());
+			assertFalse(backend.feed().get(0).likedByMe, "der Klick ging nicht ans Herz");
+			ui.dispose();
+		}
+		assertTrue(host.copied.isEmpty() && host.opened.isEmpty(), "nichts kopiert, kein Ordner geöffnet");
+	}
+
+	@Test
+	void secondSaveSaysAlreadyThere() throws IOException {
+		ReelsPost p = postWithPhoto(160, 90, 1);
+		PhoneUi ui = feed(PhoneHold.PORTRAIT);
+		click(ui, "save");
+		frame(ui);
+		// Enter ist „Bild speichern“.
+		assertTrue(ui.inputKey(0, UiKey.ENTER, false));
+		frame(ui);
+		assertEquals(I18n.tr("reels.toast.saved"), ui.testToast());
+		assertEquals(PhoneUi.View.FEED, ui.testView(), "Enter öffnet hier nicht die Kommentare");
+		click(ui, "save");
+		frame(ui);
+		click(ui, "saveDo");
+		frame(ui);
+		assertEquals(I18n.tr("reels.toast.saved.already"), ui.testToast());
+		assertEquals(1, screenshots().size(), "keine zweite Datei: " + screenshots());
+		assertEquals(PhoneUi.Sheet.NONE, ui.testSheet());
+		// Liegt unter dem Namen etwas anderes, wird nie überschrieben: die Kopie bekommt „_2“.
+		Path first = host.screenshots.resolve(ReelsExport.fileName(p.id, 1));
+		Files.write(first, new byte[]{1, 2, 3});
+		click(ui, "save");
+		frame(ui);
+		click(ui, "saveDo");
+		frame(ui);
+		assertEquals(I18n.tr("reels.toast.saved"), ui.testToast());
+		assertEquals(3, Files.size(first), "nichts überschrieben");
+		assertTrue(Files.isRegularFile(host.screenshots.resolve(ReelsExport.fileName(p.id, 2))));
+		ui.dispose();
+	}
+
+	@Test
+	void twoClicksBeforeTheWorkerRunsGiveOneFileAndTheSavedToast() throws IOException {
+		Manual worker = new Manual();
+		reels = Reels.forTest(modules, backend, worker, UTC);
+		postWithPhoto(160, 90, 1);
+		PhoneUi ui = feed(PhoneHold.LANDSCAPE);
+		worker.runAll();
+		click(ui, "save");
+		frame(ui);
+		worker.runAll();
+		click(ui, "saveDo");
+		assertTrue(ui.testSheetBusy(), "der Auftrag wartet im Hintergrund");
+		int jobs = worker.jobs.size();
+		// Doppelklick, bevor das nächste Bild gezeichnet ist – und noch einer danach.
+		click(ui, "saveDo");
+		RecCanvas c = frame(ui);
+		click(ui, "saveDo");
+		click(ui, "saveCopy");
+		click(ui, "saveFolder");
+		assertTrue(ui.inputKey(0, UiKey.ENTER, false));
+		assertEquals(jobs, worker.jobs.size(), "kein zweiter Auftrag");
+		// So lange sind alle drei grau.
+		for (String key : new String[]{"reels.save.do", "reels.save.copy", "reels.save.folder"}) {
+			RecCanvas.Text t = textOf(c, I18n.tr(key));
+			assertNotNull(t, key);
+			assertEquals(FeedView.TEXT_DIM, t.argb, key + " ist blass");
+		}
+		assertEquals(ComposeView.BUTTON_GREY, fillAt(c, spot(ui, "saveDo")).argb, "auch „Bild speichern“ ist grau, solange es läuft");
+		assertTrue(screenshots().isEmpty());
+		assertEquals(PhoneUi.Sheet.SAVE, ui.testSheet());
+
+		worker.runAll();
+		frame(ui);
+		assertEquals(1, screenshots().size(), "genau eine Datei: " + screenshots());
+		assertEquals(I18n.tr("reels.toast.saved"), ui.testToast());
+		assertEquals(PhoneUi.Sheet.NONE, ui.testSheet());
+		assertFalse(ui.testSheetBusy());
+		assertTrue(host.copied.isEmpty() && host.opened.isEmpty());
+
+		// Weggesteckt, bevor der Auftrag fertig ist: die Datei bleibt, eine Meldung gibt es nicht mehr.
+		Files.delete(host.screenshots.resolve(screenshots().get(0)));
+		ui.testTicker += PhoneUi.TOAST_MS + 1;
+		frame(ui);
+		click(ui, "save");
+		frame(ui);
+		click(ui, "saveDo");
+		ui.dispose();
+		worker.runAll();
+		assertEquals(1, screenshots().size());
+		assertNull(ui.testToast());
+	}
+
+	/** Die erste Fläche, die genau dieses Rechteck füllt (der Grund eines Knopfs), oder null. */
+	private static RecCanvas.Fill fillAt(RecCanvas c, int[] r) {
+		for (RecCanvas.Fill f : c.fills) {
+			if (Math.abs(f.x1 - r[0]) < 0.01 && Math.abs(f.y1 - r[1]) < 0.01 && Math.abs(f.x2 - r[0] - r[2]) < 0.01
+					&& Math.abs(f.y2 - r[1] - r[3]) < 0.01) return f;
+		}
+		return null;
+	}
+
+	@Test
+	void rejectedWorkerShowsTheFailedToastAndFreesTheSheet() throws IOException {
+		Gate worker = new Gate();
+		reels = Reels.forTest(modules, backend, worker, UTC);
+		postWithPhoto(160, 90, 1);
+		PhoneUi ui = feed(PhoneHold.LANDSCAPE);
+		click(ui, "save");
+		frame(ui);
+		String[][] cases = {{"saveDo", "reels.toast.save.failed"}, {"saveCopy", "reels.toast.copy.failed"},
+				{"saveFolder", "reels.toast.folder.failed"}};
+		for (String[] one : cases) {
+			worker.reject = true;
+			click(ui, one[0]);
+			worker.reject = false;
+			assertEquals(I18n.tr(one[1]), ui.testToast(), one[0]);
+			assertFalse(ui.testSheetBusy(), one[0] + ": das Blatt ist wieder frei");
+			assertEquals(PhoneUi.Sheet.SAVE, ui.testSheet());
+			frame(ui);
+		}
+		assertTrue(screenshots().isEmpty() && host.copied.isEmpty() && host.opened.isEmpty());
+		// Danach geht es wieder.
+		click(ui, "saveDo");
+		frame(ui);
+		assertEquals(I18n.tr("reels.toast.saved"), ui.testToast());
+		ui.dispose();
+	}
+
+	@Test
+	void missingPhotoSaysSo() {
+		post("Ohne Datei", host.name, 2, false);
+		PhoneUi ui = feed(PhoneHold.LANDSCAPE);
+		click(ui, "save");
+		frame(ui);
+		click(ui, "saveDo");
+		frame(ui);
+		assertEquals(I18n.tr("reels.toast.save.missing"), ui.testToast());
+		assertFalse(Files.exists(host.screenshots), "nichts angelegt");
+		assertFalse(ui.testSheetBusy());
+		assertEquals(PhoneUi.Sheet.SAVE, ui.testSheet(), "das Blatt bleibt offen");
+		// Ohne Screenshots-Ordner (der Baum kennt keinen): ehrlich „nicht gespeichert“.
+		host.screenshots = null;
+		click(ui, "saveDo");
+		assertEquals(I18n.tr("reels.toast.save.failed"), ui.testToast());
+		assertFalse(ui.testSheetBusy());
+		click(ui, "saveFolder");
+		assertEquals(I18n.tr("reels.toast.folder.failed"), ui.testToast());
+		assertTrue(host.opened.isEmpty());
+		ui.dispose();
+	}
+
+	@Test
+	void copyPictureReportsEachResult() throws IOException {
+		ReelsPost p = postWithPhoto(160, 90, 1);
+		PhoneUi ui = feed(PhoneHold.PORTRAIT);
+		click(ui, "save");
+		frame(ui);
+		ImageClipboard.Result[] results = {ImageClipboard.Result.OK, ImageClipboard.Result.UNSUPPORTED, ImageClipboard.Result.FAILED};
+		String[] keys = {"reels.toast.copied", "reels.toast.copy.unsupported", "reels.toast.copy.failed"};
+		for (int i = 0; i < results.length; i++) {
+			host.copyResult = results[i];
+			click(ui, "saveCopy");
+			frame(ui);
+			assertEquals(I18n.tr(keys[i]), ui.testToast(), results[i].toString());
+			assertEquals(i + 1, host.copied.size(), "über den Baum, nie direkt in die Zwischenablage");
+			assertEquals(backend.photoFile(p), host.copied.get(i));
+			assertEquals(PhoneUi.Sheet.SAVE, ui.testSheet(), "das Blatt bleibt offen");
+			assertFalse(ui.testSheetBusy());
+		}
+		assertTrue(screenshots().isEmpty(), "Kopieren legt keine Datei an");
+		ui.dispose();
+	}
+
+	@Test
+	void openFolderGoesThroughTheHostAndReportsFailure() throws IOException {
+		postWithPhoto(160, 90, 1);
+		PhoneUi ui = feed(PhoneHold.LANDSCAPE);
+		click(ui, "save");
+		frame(ui);
+		assertFalse(Files.exists(host.screenshots));
+		click(ui, "saveFolder");
+		frame(ui);
+		assertEquals(java.util.Collections.singletonList(host.screenshots), host.opened);
+		assertTrue(Files.isDirectory(host.screenshots), "der Ordner wird angelegt, falls nötig");
+		assertNull(ui.testToast(), "geklappt: keine Meldung");
+		assertEquals(PhoneUi.Sheet.SAVE, ui.testSheet());
+		assertFalse(ui.testSheetBusy());
+		host.openOk = false;
+		click(ui, "saveFolder");
+		frame(ui);
+		assertEquals(2, host.opened.size());
+		assertEquals(I18n.tr("reels.toast.folder.failed"), ui.testToast());
+		// Liegt dort eine Datei statt eines Ordners, lässt er sich nicht anlegen.
+		host.openOk = true;
+		host.screenshots = tmp.resolve("feed-datei");
+		Files.write(host.screenshots, new byte[]{1});
+		ui.testTicker += PhoneUi.TOAST_MS + 1;
+		frame(ui);
+		click(ui, "saveFolder");
+		frame(ui);
+		assertEquals(2, host.opened.size(), "der Baum wird gar nicht erst gefragt");
+		assertEquals(I18n.tr("reels.toast.folder.failed"), ui.testToast());
+		ui.dispose();
+	}
+
+	@Test
+	void aRelativeScreenshotsPathIsMadeAbsolute() throws IOException {
+		ReelsPost p = postWithPhoto(160, 90, 1);
+		Path target = tmp.resolve("spiel").resolve("screenshots").toAbsolutePath().normalize();
+		Path here = java.nio.file.Paths.get("").toAbsolutePath();
+		// Wie im Entwickler-Start: der Spielordner ist nur „.“ – der Pfad zum Ordner also relativ.
+		host.screenshots = here.relativize(target);
+		assertFalse(host.screenshots.isAbsolute());
+		PhoneUi ui = feed(PhoneHold.LANDSCAPE);
+		click(ui, "save");
+		frame(ui);
+		click(ui, "saveFolder");
+		frame(ui);
+		assertEquals(1, host.opened.size());
+		assertTrue(host.opened.get(0).isAbsolute(), "der Baum bekommt einen festen Pfad: " + host.opened.get(0));
+		assertEquals(target, host.opened.get(0));
+		click(ui, "saveDo");
+		frame(ui);
+		assertEquals(I18n.tr("reels.toast.saved"), ui.testToast());
+		assertTrue(Files.isRegularFile(target.resolve(ReelsExport.fileName(p.id, 1))));
+		ui.dispose();
+	}
+
+	@Test
+	void escClosesTheSheetButNotThePhone() {
+		post("Schaut mal!", host.name, 2, false);
+		PhoneUi ui = feed(PhoneHold.LANDSCAPE);
+		click(ui, "save");
+		frame(ui);
+		// Die Dreh-Taste lässt das Blatt offen.
+		assertTrue(ui.inputKey('R', UiKey.NONE, false));
+		assertEquals(PhoneHold.PORTRAIT, ui.testHold());
+		assertEquals(PhoneUi.Sheet.SAVE, ui.testSheet());
+		frame(ui);
+		spot(ui, "saveDo");
+		assertTrue(ui.inputKey(0, UiKey.ESCAPE, false), "Esc ist verbraucht");
+		assertEquals(PhoneUi.Sheet.NONE, ui.testSheet());
+		assertFalse(ui.isClosing(), "das Handy bleibt draußen");
+		assertEquals(PhoneUi.View.FEED, ui.testView());
+		assertFalse(ui.inputKey(0, UiKey.ESCAPE, false), "erst das nächste Esc gehört dem Bildschirm der Version");
+		// Die Handy-Taste steckt das Handy auch mit offenem Blatt weg.
+		frame(ui);
+		click(ui, "save");
+		assertTrue(ui.inputKey('K', UiKey.NONE, false));
+		assertTrue(ui.isClosing());
+		ui.dispose();
+		assertEquals(PhoneUi.Sheet.NONE, ui.testSheet(), "weggesteckt: kein Blatt mehr");
+	}
+
+	@Test
+	void wheelAndArrowsDoNotPageWhileASheetIsOpen() {
+		post("Älter", host.name, 5, false);
+		post("Neuer", host.name, 2, false);
+		PhoneUi ui = feed(PhoneHold.LANDSCAPE);
+		for (PhoneUi.Sheet sheet : new PhoneUi.Sheet[]{PhoneUi.Sheet.SAVE, PhoneUi.Sheet.FILTER, PhoneUi.Sheet.STREAK}) {
+			ui.openSheet(sheet);
+			assertEquals(sheet, ui.testSheet());
+			frame(ui);
+			assertTrue(ui.inputScroll(0, 0, -1), "das Rad gehört trotzdem dem Handy");
+			ui.inputScroll(0, 0, -3);
+			if (sheet != PhoneUi.Sheet.FILTER) {
+				assertTrue(ui.inputKey(0, UiKey.DOWN, false));
+				assertTrue(ui.inputKey(0, UiKey.RIGHT, false));
+			}
+			assertTrue(ui.inputKey('X', UiKey.NONE, false), "auch andere Tasten sind verbraucht");
+			assertEquals(0, ui.testPage(), sheet + ": nichts blättert");
+			assertEquals(sheet, ui.testSheet());
+			ui.closeSheet();
+			frame(ui);
+		}
+		ui.inputScroll(0, 0, -1);
+		assertEquals(1, ui.testPage(), "ohne Blatt blättert das Rad wieder");
+		ui.dispose();
+	}
+
+	@Test
+	void cameraHomeAndCommentsCloseTheSheet() {
+		post("Schaut mal!", host.name, 2, false);
+		PhoneUi ui = feed(PhoneHold.PORTRAIT);
+		ui.openSheet(PhoneUi.Sheet.SAVE);
+		ui.home();
+		assertEquals(PhoneUi.Sheet.NONE, ui.testSheet(), "„Feed“ schließt das Blatt");
+		ui.openSheet(PhoneUi.Sheet.FILTER);
+		ui.openComments();
+		assertEquals(PhoneUi.Sheet.NONE, ui.testSheet());
+		assertEquals(PhoneUi.View.COMMENTS, ui.testView());
+		// Über den Kommentaren geht kein Blatt auf.
+		ui.openSheet(PhoneUi.Sheet.SAVE);
+		assertEquals(PhoneUi.Sheet.NONE, ui.testSheet());
+		ui.closeComments();
+		ui.openSheet(PhoneUi.Sheet.STREAK);
+		assertEquals(PhoneUi.Sheet.STREAK, ui.testSheet());
+		ui.openCamera();
+		assertEquals(PhoneUi.Sheet.NONE, ui.testSheet());
+		assertEquals(PhoneUi.View.CAMERA, ui.testView());
+		ui.openSheet(PhoneUi.Sheet.SAVE);
+		assertEquals(PhoneUi.Sheet.NONE, ui.testSheet(), "in der Kamera gibt es keine Blätter");
+		ui.dispose();
+	}
+
+	@Test
+	void savingWorksInASecondGameWindow() throws IOException {
+		ReelsPost p = postWithPhoto(160, 90, 1);
+		backend.flush();
+		byte[] before = Files.readAllBytes(tmp.resolve("feed.json"));
+		reels = Reels.forTest(modules, secondWindow(backend), DIRECT, UTC);
+		PhoneUi ui = feed(PhoneHold.LANDSCAPE);
+		click(ui, "save");
+		frame(ui);
+		click(ui, "saveDo");
+		frame(ui);
+		assertEquals(I18n.tr("reels.toast.saved"), ui.testToast());
+		assertTrue(Files.isRegularFile(host.screenshots.resolve(ReelsExport.fileName(p.id, 1))));
+		ui.dispose();
+		assertTrue(java.util.Arrays.equals(before, Files.readAllBytes(tmp.resolve("feed.json"))), "feed.json bleibt, wie sie war");
+	}
+
+	// --- B: Marken am Post (Shader, Instanz, Version) ---
+
+	@Test
+	void shutterCapturesMetaAndThePostCarriesIt() {
+		host.meta = new ReelsMeta("26.2", "fabric", "BSL_v8.2.09", "All the Mods 10");
+		PhoneUi ui = camera(PhoneHold.LANDSCAPE);
+		shoot(ui);
+		// Was nach dem Auslösen gilt, zählt nicht mehr: festgehalten wird beim Auslösen.
+		host.meta = new ReelsMeta("1.21.4", "quilt", "Anderer", null);
+		armPost(ui);
+		ui.keyPressed(0, UiKey.ENTER, false);
+		ReelsPost top = backend.feed().get(0);
+		assertNotNull(top.meta, "der Post trägt die Angaben");
+		assertEquals("26.2", top.meta.mc);
+		assertEquals("fabric", top.meta.loader);
+		assertEquals("BSL_v8.2.09", top.meta.shader);
+		assertEquals("All the Mods 10", top.meta.pack);
+		ui.dispose();
+		ReelsPost read = new LocalReelsBackend(tmp, UTC).feed().get(0);
+		assertEquals("BSL_v8.2.09", read.meta.shader, "und sie sind gesichert");
+		assertEquals("All the Mods 10", read.meta.pack);
+	}
+
+	@Test
+	void retryTakesFreshMeta() {
+		host.meta = new ReelsMeta("26.2", "fabric", "Erster Shader", null);
+		PhoneUi ui = camera(PhoneHold.PORTRAIT);
+		shoot(ui);
+		frame(ui);
+		click(ui, "composeRetry");
+		frame(ui);
+		// „Nochmal“ nimmt ein neues Foto auf – und mit ihm neue Angaben (der Shader ist jetzt aus).
+		host.meta = new ReelsMeta("26.2", "fabric", null, "Mein Pack");
+		shoot(ui);
+		armPost(ui);
+		ui.keyPressed(0, UiKey.ENTER, false);
+		ReelsPost top = backend.feed().get(0);
+		assertNull(top.meta.shader);
+		assertEquals("Mein Pack", top.meta.pack);
+		// Ohne Angaben vom Baum hat der Post kein „meta“.
+		host.meta = null;
+		frame(ui);
+		click(ui, "camera");
+		frame(ui);
+		shoot(ui);
+		armPost(ui);
+		ui.keyPressed(0, UiKey.ENTER, false);
+		assertNull(backend.feed().get(0).meta);
+		ui.dispose();
+	}
+
+	@Test
+	void chipsShowOnlyKnownValues() {
+		host.meta = new ReelsMeta("26.2", "fabric", null, null);
+		postMeta("Nur Shader", host.name, 5, new ReelsMeta("26.2", "fabric", "BSL", null));
+		PhoneUi ui = ui(PhoneHold.LANDSCAPE);
+		RecCanvas c = frame(ui);
+		spot(ui, "metaShader");
+		assertNull(ui.testSpot("metaPack"), "keine Instanz bekannt: keine Marke");
+		spot(ui, "metaVersion");
+		assertTrue(c.strings().contains("BSL") && c.strings().contains("26.2 · Fabric"), c.strings().toString());
+		ui.dispose();
+
+		postMeta("Nur Instanz", host.name, 4, new ReelsMeta(null, null, null, "Mein Pack"));
+		ui = ui(PhoneHold.LANDSCAPE);
+		c = frame(ui);
+		assertNull(ui.testSpot("metaShader"));
+		spot(ui, "metaPack");
+		assertNull(ui.testSpot("metaVersion"), "Version unbekannt: keine Marke");
+		assertTrue(c.strings().contains("Mein Pack"));
+		ui.dispose();
+
+		postMeta("Nur der Loader", host.name, 3, new ReelsMeta(null, "neoforge", "BSL", null));
+		ui = ui(PhoneHold.LANDSCAPE);
+		c = frame(ui);
+		assertTrue(c.strings().contains("NeoForge"), "nur der Teil, den es gibt: " + c.strings());
+		ui.dispose();
+
+		// Alte Posts ohne Angaben: keine Marke.
+		post("Alt", host.name, 2, false);
+		for (PhoneHold hold : PhoneHold.values()) {
+			ui = ui(hold);
+			frame(ui);
+			for (String s : new String[]{"metaShader", "metaPack", "metaVersion"}) assertNull(ui.testSpot(s), hold + " " + s);
+			ui.dispose();
+		}
+	}
+
+	@Test
+	void versionChipAloneIsNotDrawn() {
+		host.meta = new ReelsMeta("26.2", "fabric", null, null);
+		post("Derselbe Text", host.name, 5, false);
+		postMeta("Derselbe Text", host.name, 2, new ReelsMeta("26.2", "fabric", null, null));
+		for (PhoneHold hold : PhoneHold.values()) {
+			PhoneUi ui = ui(hold);
+			RecCanvas with = frame(ui);
+			assertNotNull(backend.feed().get(ui.testPage()).meta);
+			for (String s : new String[]{"metaShader", "metaPack", "metaVersion"}) assertNull(ui.testSpot(s), hold + " " + s);
+			assertFalse(with.shows("26.2"), "allein stünde auf jedem Post dasselbe: " + with.strings());
+			// Der Block sieht aus wie bei einem Post ohne Angaben: der Name steht auf derselben Höhe.
+			ui.inputScroll(0, 0, -1);
+			RecCanvas without = frame(ui);
+			assertNull(backend.feed().get(ui.testPage()).meta);
+			assertEquals(textOf(without, host.name).y, textOf(with, host.name).y, 1e-6, hold + ": gleiche Höhe");
+			assertEquals(textOf(without, "Derselbe Text").y, textOf(with, "Derselbe Text").y, 1e-6);
+			ui.dispose();
+		}
+	}
+
+	@Test
+	void versionChipShowsWhenItDiffersFromTheRunningGame() {
+		host.meta = new ReelsMeta("26.2", "fabric", null, null);
+		postMeta("Andere Version", host.name, 5, new ReelsMeta("1.21.4", "fabric", null, null));
+		PhoneUi ui = ui(PhoneHold.LANDSCAPE);
+		RecCanvas c = frame(ui);
+		spot(ui, "metaVersion");
+		assertTrue(c.strings().contains("1.21.4 · Fabric"), c.strings().toString());
+		ui.dispose();
+		postMeta("Anderer Loader", host.name, 4, new ReelsMeta("26.2", "quilt", null, null));
+		ui = ui(PhoneHold.PORTRAIT);
+		c = frame(ui);
+		spot(ui, "metaVersion");
+		assertTrue(c.strings().contains("26.2 · Quilt"), c.strings().toString());
+		ui.dispose();
+		// Kennt das Spiel die eigene Version nicht, gilt nichts als abweichend.
+		host.meta = null;
+		ui = ui(PhoneHold.LANDSCAPE);
+		frame(ui);
+		assertNull(ui.testSpot("metaVersion"));
+		ui.dispose();
+	}
+
+	@Test
+	void chipsRunShaderInstanceVersion() {
+		postMeta("Alle drei", host.name, 2, new ReelsMeta("26.2", "fabric", "BSL", "Mein Pack"));
+		PhoneUi ui = ui(PhoneHold.LANDSCAPE);
+		RecCanvas c = frame(ui);
+		PhoneLayout l = PhoneLayout.of(host.w, host.h, PhoneHold.LANDSCAPE);
+		int[] shader = spot(ui, "metaShader"), pack = spot(ui, "metaPack"), version = spot(ui, "metaVersion");
+		assertEquals(l.screenX + Math.round(16 * l.q), shader[0], "die erste Marke steht am linken Rand des Textblocks");
+		int gap = Math.round(6 * l.q);
+		assertEquals(shader[0] + shader[2] + gap, pack[0], "Shader, dann Instanz");
+		assertEquals(pack[0] + pack[2] + gap, version[0], "dann die Version");
+		assertEquals(shader[1], pack[1]);
+		assertEquals(shader[1], version[1]);
+		// Die Marken stehen unter dem Text und enden an der Kante, an der der Block immer endet.
+		RecCanvas.Text caption = textOf(c, "Alle drei");
+		assertTrue(shader[1] >= caption.y + caption.h, "unter dem Text");
+		assertEquals(l.screenY + l.screenH - Math.round(14 * l.q), shader[1] + shader[3], "untere Kante wie bisher");
+		assertEquals(174, version[2], "„26.2 · Fabric“ ist 174 Pixel breit");
+		assertEquals(24, version[3]);
+		// Dunkles Feld, blasser Text, Symbol vor dem Namen.
+		assertEquals(FeedView.CHIP, fillAt(c, shader).argb);
+		RecCanvas.Text name = textOf(c, "BSL");
+		assertEquals(FeedView.TEXT_SOFT, name.argb);
+		assertTrue(name.x >= shader[0] + PhoneIcons.width(PhoneIcons.SUN, (int) name.scale), "Platz für das Symbol vor dem Namen");
+		ui.dispose();
+	}
+
+	@Test
+	void chipsUseOneRowInLandscapeAndUpToTwoInPortrait() {
+		postMeta("Lang", host.name, 2, new ReelsMeta("1.21.4", "neoforge", chars(20), chars(18)));
+		PhoneUi ui = ui(PhoneHold.LANDSCAPE);
+		frame(ui);
+		int[] shader = spot(ui, "metaShader"), pack = spot(ui, "metaPack"), version = spot(ui, "metaVersion");
+		assertTrue(shader[1] == pack[1] && pack[1] == version[1], "quer: eine Zeile");
+		ui.dispose();
+
+		ui = ui(PhoneHold.PORTRAIT);
+		frame(ui);
+		shader = spot(ui, "metaShader");
+		pack = spot(ui, "metaPack");
+		PhoneLayout l = PhoneLayout.of(host.w, host.h, PhoneHold.PORTRAIT);
+		assertEquals(shader[1] + shader[3] + Math.round(4 * l.q), pack[1], "hochkant: die Instanz steht in der zweiten Zeile");
+		assertEquals(shader[0], pack[0], "beide beginnen links");
+		assertNull(ui.testSpot("metaVersion"), "die Version bekommt nie eine dritte Zeile");
+		assertEquals(22, shader[3]);
+		assertTrue(pack[1] + pack[3] <= spot(ui, "home")[1], "über der Leiste");
+		ui.dispose();
+
+		// Kurze Namen passen auch hochkant in eine Zeile.
+		postMeta("Kurz", host.name, 1, new ReelsMeta("26.2", "fabric", "BSL", "Pack"));
+		ui = ui(PhoneHold.PORTRAIT);
+		frame(ui);
+		assertEquals(spot(ui, "metaShader")[1], spot(ui, "metaPack")[1]);
+		ui.dispose();
+	}
+
+	@Test
+	void packChipSurvivesALongShaderNameInPortrait() {
+		postMeta("Lang", host.name, 2, new ReelsMeta("26.2", "fabric", chars(40), "All the Mods 10"));
+		PhoneUi ui = ui(PhoneHold.PORTRAIT);
+		RecCanvas c = frame(ui);
+		int[] shader = spot(ui, "metaShader"), pack = spot(ui, "metaPack");
+		assertTrue(pack[1] > shader[1], "die Instanz steht in ihrer eigenen Zeile");
+		assertTrue(c.strings().contains("All the Mods 10"), "und ist ganz zu lesen: " + c.strings());
+		PhoneLayout l = PhoneLayout.of(host.w, host.h, PhoneHold.PORTRAIT);
+		int width = l.screenW - Math.round(14 * l.q) - Math.round(84 * l.q);
+		assertTrue(shader[2] <= width, "der Shader-Name ist auf die Spalte gekürzt");
+		boolean cut = false;
+		for (String s : c.strings()) if (s.startsWith("abcdef") && s.endsWith("…")) cut = true;
+		assertTrue(cut, "gekürzt mit „…“: " + c.strings());
+		ui.dispose();
+	}
+
+	@Test
+	void versionChipIsDroppedBeforeAnythingIsClipped() {
+		String shader = chars(28), pack = new StringBuilder(chars(28)).reverse().toString();
+		postMeta("Zwei lange Namen", host.name, 2, new ReelsMeta("1.21.4", "neoforge", shader, pack));
+		PhoneUi ui = ui(PhoneHold.LANDSCAPE);
+		RecCanvas c = frame(ui);
+		assertEquals(373, spot(ui, "metaShader")[2], "28 Zeichen mit Symbol");
+		spot(ui, "metaPack");
+		assertNull(ui.testSpot("metaVersion"), "die Version passt nicht mehr dahinter und fällt weg");
+		assertTrue(c.strings().contains(shader) && c.strings().contains(pack), "die Namen bleiben ganz: " + c.strings());
+		ui.dispose();
+		// Mit etwas kürzeren Namen passen alle drei.
+		postMeta("Kürzer", host.name, 1, new ReelsMeta("1.21.4", "neoforge", chars(20), chars(20)));
+		ui = ui(PhoneHold.LANDSCAPE);
+		frame(ui);
+		spot(ui, "metaVersion");
+		ui.dispose();
+	}
+
+	@Test
+	void longNamesAreClippedInsideTheInfoColumn() {
+		postMeta("Sehr lang", host.name, 2, new ReelsMeta("26.2", "fabric", chars(40), chars(64)));
+		for (PhoneHold hold : PhoneHold.values()) {
+			boolean land = hold == PhoneHold.LANDSCAPE;
+			PhoneLayout l = PhoneLayout.of(host.w, host.h, hold);
+			int left = l.screenX + Math.round((land ? 16 : 14) * l.q);
+			int right = l.screenX + l.screenW - Math.round((land ? 120 : 84) * l.q);
+			PhoneUi ui = ui(hold);
+			RecCanvas c = frame(ui);
+			for (String s : new String[]{"metaShader", "metaPack"}) {
+				int[] r = spot(ui, s);
+				assertTrue(r[0] >= left && r[0] + r[2] <= right, hold + " " + s + " in der Spalte " + left + "…" + right + ": " + r[0] + "+" + r[2]);
+			}
+			// Höchstens 28 Zeichen je Name, dann „…“.
+			int shown = 0;
+			for (RecCanvas.Text t : c.texts) {
+				if (!t.text.startsWith("abc") || !t.text.endsWith("…")) continue;
+				shown++;
+				assertTrue(t.text.length() <= 28, hold + ": " + t.text);
+				assertTrue(t.x >= left && t.x + t.w <= right, hold + ": Text in der Spalte: " + t);
+			}
+			assertEquals(2, shown, hold + ": beide Namen gekürzt: " + c.strings());
+			ui.dispose();
+		}
+	}
+
+	@Test
+	void chipsNeverTouchTheRightColumn() {
+		host.meta = new ReelsMeta("26.2", "fabric", null, null);
+		postMeta("Sehr lang", host.name, 3, new ReelsMeta("1.21.4", "neoforge", chars(40), chars(64)));
+		postMeta("Mittel", host.name, 2, new ReelsMeta("1.21.4", "neoforge", chars(20), chars(20)));
+		postMeta("Kurz", host.name, 1, new ReelsMeta("1.21.4", "neoforge", "BSL", "Pack"));
+		int[][] windows = {{1920, 1080}, {1280, 720}, {854, 480}, {1024, 768}, {800, 1000}};
+		for (int[] win : windows) {
+			for (PhoneHold hold : PhoneHold.values()) {
+				host.size(win[0], win[1], 2);
+				PhoneUi ui = ui(hold);
+				for (int page = 0; page < 3; page++) {
+					frame(ui);
+					String tag = hold + " " + win[0] + "x" + win[1] + " Seite " + page;
+					int[] heart = spot(ui, "heart");
+					int[] screen = spot(ui, "screen");
+					int seen = 0;
+					for (String s : new String[]{"metaShader", "metaPack", "metaVersion"}) {
+						int[] r = ui.testSpot(s);
+						if (r == null) continue;
+						seen++;
+						assertTrue(r[0] + r[2] < heart[0], tag + ": " + s + " endet vor der rechten Spalte");
+						assertTrue(inside(r, screen), tag + ": " + s + " auf dem Bildschirm");
+						for (String other : new String[]{"heart", "comment", "save", "camera", "rotate", "home", "filterChip", "pos"}) {
+							int[] o = ui.testSpot(other);
+							if (o != null) assertFalse(overlap(r, o), tag + ": " + s + " überlappt " + other);
+						}
+					}
+					assertTrue(seen >= 1, tag + ": mindestens eine Marke");
+					ui.inputScroll(0, 0, -1);
+				}
+				ui.dispose();
+			}
+		}
+	}
+
+	// --- C: Filter und Reihenfolge ---
+
+	@Test
+	void filterChipSitsBesideThePageChipInLandscapeAndBelowTheTitleInPortrait() {
+		post("Älter", "Rotkaeppchen", 5, false);
+		post("Neuer", host.name, 2, false);
+		PhoneUi ui = ui(PhoneHold.LANDSCAPE);
+		RecCanvas c = frame(ui);
+		int[] pos = spot(ui, "pos"), chip = spot(ui, "filterChip");
+		String label = I18n.tr("setting.mcReels.feedFilter.all") + " · " + I18n.tr("setting.mcReels.feedSort.newest");
+		assertEquals("All · New", label);
+		RecCanvas.Text text = textOf(c, label);
+		assertNotNull(text, "die Marke nennt Filter und Reihenfolge: " + c.strings());
+		RecCanvas.Text title = textOf(c, I18n.tr("reels.tab"));
+		assertTrue(chip[0] + chip[2] > pos[0] + pos[2] && text.x >= pos[0] + pos[2], "quer: rechts neben der Seitenzahl");
+		assertEquals(pos[1], Math.round(text.y) - Math.max(1, Math.round(3 * PhoneLayout.of(host.w, host.h, PhoneHold.LANDSCAPE).q)),
+				"auf derselben Höhe wie die Seitenzahl");
+		assertTrue(chip[0] + chip[2] <= title.x, "links vom Titel");
+		assertTrue(inside(chip, spot(ui, "screen")));
+		// Die sichtbare Marke: dunkles Feld wie die Seitenzahl, 24 Pixel hoch, mit dem kleinen Pfeil.
+		RecCanvas.Fill box = null;
+		for (RecCanvas.Fill f : c.fills) {
+			if (f.argb == FeedView.CHIP && f.x1 < text.x && f.x2 > text.x + text.w && f.y1 <= text.y && f.y2 >= text.y + text.h) box = f;
+		}
+		assertNotNull(box);
+		assertEquals(24.0, box.y2 - box.y1, 0.01);
+		assertTrue(box.x2 - box.x1 > text.w + 2 * 10, "Platz für den Pfeil hinter dem Text");
+		ui.dispose();
+
+		ui = ui(PhoneHold.PORTRAIT);
+		c = frame(ui);
+		pos = spot(ui, "pos");
+		chip = spot(ui, "filterChip");
+		text = textOf(c, label);
+		title = textOf(c, I18n.tr("reels.tab"));
+		assertTrue(text.y >= title.y + title.h, "hochkant: unter dem Titel");
+		assertTrue(text.y >= pos[1] + pos[3], "und unter der Seitenzahl");
+		assertTrue(chip[1] >= title.y + title.h, "auch die Klickfläche beginnt erst unter der Titelzeile");
+		assertEquals(pos[0], Math.round(text.x) - Math.round(8 * PhoneLayout.of(host.w, host.h, PhoneHold.PORTRAIT).q), "linksbündig mit der Seitenzahl");
+		assertTrue(inside(chip, spot(ui, "screen")));
+		assertFalse(overlap(chip, spot(ui, "streak")) || overlap(chip, spot(ui, "heart")));
+		ui.dispose();
+	}
+
+	@Test
+	void chipHitAreaIsAtLeastFortyPixelsHigh() {
+		post("Neuer", host.name, 2, false);
+		for (PhoneHold hold : PhoneHold.values()) {
+			PhoneUi ui = feed(hold);
+			int[] chip = spot(ui, "filterChip");
+			assertTrue(chip[3] >= 40, hold + ": " + chip[3] + " Pixel hoch");
+			assertTrue(chip[2] >= 40, hold + ": " + chip[2] + " Pixel breit");
+			ui.dispose();
+		}
+		// Auch mit dem längsten Text (Polnisch) passt die Marke in beide Haltungen.
+		I18n.use("pl");
+		for (PhoneHold hold : PhoneHold.values()) {
+			modules.reels.feedSort.set(FeedSort.POPULAR);
+			PhoneUi ui = ui(hold);
+			RecCanvas c = frame(ui);
+			String label = I18n.tr("setting.mcReels.feedFilter.all") + " · " + I18n.tr("setting.mcReels.feedSort.popular");
+			assertEquals(21, label.length());
+			RecCanvas.Text t = textOf(c, label);
+			assertNotNull(t, hold + ": ganz zu lesen: " + c.strings());
+			assertEquals(PhoneText.scale(22, PhoneLayout.of(host.w, host.h, hold).q), t.scale, 1e-6, hold + ": in voller Größe");
+			ui.dispose();
+		}
+	}
+
+	@Test
+	void chipOpensTheSheetAndAChoiceAppliesAtOnce() {
+		post("Mein altes", host.name, 50, false);
+		post("Fremdes", "Rotkaeppchen", 26, false);
+		post("Mein neues", host.name, 2, false);
+		for (PhoneHold hold : PhoneHold.values()) {
+			modules.reels.feedFilter.set(FeedFilter.ALL);
+			modules.reels.feedSort.set(FeedSort.NEWEST);
+			PhoneUi ui = feed(hold);
+			int clicks = host.clicks;
+			click(ui, "filterChip");
+			assertEquals(PhoneUi.Sheet.FILTER, ui.testSheet(), hold.toString());
+			assertEquals(clicks + 1, host.clicks);
+			RecCanvas c = frame(ui);
+			for (String s : new String[]{"filterSheet", "filterBack", "filterClose", "filterAll", "filterFriends", "filterMine",
+					"sortNewest", "sortPopular"}) {
+				spot(ui, s);
+			}
+			assertTrue(c.strings().contains(I18n.tr("reels.filter.title")) && c.strings().contains(I18n.tr("reels.filter.show"))
+					&& c.strings().contains(I18n.tr("reels.filter.sort")), c.strings().toString());
+			assertTrue(c.strings().contains("Friends") && c.strings().contains("Me") && c.strings().contains("Popular"), c.strings().toString());
+			// Das Gewählte ist rot, die anderen grau; kein Segment ist schmaler als 60 Pixel.
+			assertEquals(FeedView.RED_BUTTON, fillAt(c, spot(ui, "filterAll")).argb);
+			assertEquals(ComposeView.BUTTON_GREY, fillAt(c, spot(ui, "filterMine")).argb);
+			assertEquals(FeedView.RED_BUTTON, fillAt(c, spot(ui, "sortNewest")).argb);
+			for (String s : new String[]{"filterAll", "filterFriends", "filterMine", "sortNewest", "sortPopular"}) {
+				assertTrue(spot(ui, s)[2] >= 60 && spot(ui, s)[3] >= 40, hold + " " + s + ": " + spot(ui, s)[2] + "x" + spot(ui, s)[3]);
+				assertTrue(inside(spot(ui, s), spot(ui, "filterSheet")), hold + " " + s);
+			}
+			int[] all = spot(ui, "filterAll"), friends = spot(ui, "filterFriends"), mine = spot(ui, "filterMine");
+			assertTrue(all[0] + all[2] < friends[0] && friends[0] + friends[2] < mine[0], "Alle | Freunde | Ich");
+			if (hold == PhoneHold.LANDSCAPE) {
+				assertEquals(all[1], spot(ui, "sortNewest")[1], "quer: beide Gruppen in einer Reihe");
+				assertTrue(mine[0] + mine[2] < spot(ui, "sortNewest")[0]);
+			} else {
+				assertTrue(spot(ui, "sortNewest")[1] >= all[1] + all[3], "hochkant: Sortieren darunter");
+			}
+
+			click(ui, "filterMine");
+			assertEquals(FeedFilter.MINE, ui.testFilter());
+			assertEquals(FeedFilter.MINE, modules.reels.feedFilter.get(), "wird gemerkt");
+			assertEquals(PhoneUi.Sheet.FILTER, ui.testSheet(), "das Blatt bleibt offen");
+			c = frame(ui);
+			assertTrue(c.shows("1 / 2"), "gilt sofort: " + c.strings());
+			assertEquals(FeedView.RED_BUTTON, fillAt(c, spot(ui, "filterMine")).argb);
+			assertEquals(ComposeView.BUTTON_GREY, fillAt(c, spot(ui, "filterAll")).argb);
+			click(ui, "sortPopular");
+			assertEquals(FeedSort.POPULAR, ui.testSort());
+			assertEquals(FeedSort.POPULAR, modules.reels.feedSort.get());
+			c = frame(ui);
+			assertTrue(c.strings().contains("Me · Popular"), "die Marke im Kopf zeigt die Wahl: " + c.strings());
+			click(ui, "filterAll");
+			assertEquals(FeedFilter.ALL, ui.testFilter());
+			frame(ui);
+			click(ui, "filterClose");
+			assertEquals(PhoneUi.Sheet.NONE, ui.testSheet());
+			frame(ui);
+			click(ui, "filterChip");
+			frame(ui);
+			click(ui, "filterBack");
+			assertEquals(PhoneUi.Sheet.NONE, ui.testSheet(), "Klick aufs Foto schließt");
+			ui.dispose();
+		}
+	}
+
+	@Test
+	void pagesAndPositionFollowTheFilteredList() {
+		post("Mein altes", host.name, 50, false);
+		post("Fremdes", "Rotkaeppchen", 26, false);
+		// Der eigene Name zählt ohne Groß-/Kleinschreibung.
+		post("Mein neues", host.name.toLowerCase(java.util.Locale.ROOT), 2, false);
+		PhoneUi ui = feed(PhoneHold.PORTRAIT);
+		ui.setFilter(FeedFilter.MINE);
+		RecCanvas c = frame(ui);
+		assertTrue(c.shows("1 / 2") && c.shows("Mein neues"), c.strings().toString());
+		ui.inputScroll(0, 0, -1);
+		c = frame(ui);
+		assertEquals(1, ui.testPage());
+		assertTrue(c.shows("2 / 2") && c.shows("Mein altes"), "das fremde Foto wird übersprungen: " + c.strings());
+		ui.inputScroll(0, 0, -1);
+		assertEquals(1, ui.testPage(), "am Ende der gefilterten Liste ist Schluss");
+		// Zurück zu „Alle“: das Foto im Bild bleibt, nur seine Seitenzahl ändert sich.
+		ui.setFilter(FeedFilter.ALL);
+		c = frame(ui);
+		assertEquals(2, ui.testPage());
+		assertTrue(c.shows("3 / 3") && c.shows("Mein altes"), c.strings().toString());
+		// Die Streak zählt immer alle Posts, was auch immer der Filter zeigt.
+		assertEquals(3, backend.streak(NOON));
+		assertNotNull(textOf(c, "3"), "drei Tage in Folge, auch das fremde Foto zählt: " + c.strings());
+		ui.dispose();
+	}
+
+	@Test
+	void thePostInViewStaysWhenALikeReordersPopular() {
+		post("Zweites", host.name, 5, false);
+		post("Erstes", host.name, 2, false);
+		PhoneUi ui = feed(PhoneHold.LANDSCAPE);
+		ui.setSort(FeedSort.POPULAR);
+		RecCanvas c = frame(ui);
+		assertTrue(c.shows("Erstes") && c.shows("1 / 2"), "ohne Likes: das neueste zuerst: " + c.strings());
+		ui.inputScroll(0, 0, -1);
+		c = frame(ui);
+		assertTrue(c.shows("Zweites") && c.shows("2 / 2"));
+		// Ein Like schiebt den Post nach vorn – das Foto im Bild bleibt, nur die Seitenzahl springt.
+		click(ui, "heart");
+		c = frame(ui);
+		assertTrue(c.shows("Zweites"), "das Foto bleibt: " + c.strings());
+		assertTrue(c.shows("1 / 2"), "es ist jetzt Seite 1: " + c.strings());
+		assertEquals(0, ui.testPage());
+		ui.inputScroll(0, 0, -1);
+		assertTrue(frame(ui).shows("Erstes"));
+		ui.dispose();
+	}
+
+	@Test
+	void friendsFilterShowsTheHonestEmptyTextAndKeepsTheChip() {
+		post("Von mir", host.name, 2, false);
+		for (PhoneHold hold : PhoneHold.values()) {
+			modules.reels.feedFilter.set(FeedFilter.ALL);
+			PhoneUi ui = feed(hold);
+			ui.setFilter(FeedFilter.FRIENDS);
+			RecCanvas c = frame(ui);
+			assertEquals(0, ui.pages(), hold.toString());
+			assertTrue(c.strings().contains(I18n.tr("reels.empty.friends")), hold + ": " + c.strings());
+			assertTrue(all(c).contains(I18n.tr("reels.empty.friends.hint")), "der Hinweis steht ganz da: " + c.strings());
+			assertFalse(c.shows(I18n.tr("reels.empty")), "nicht „Noch keine Fotos“ – es gibt ja welche");
+			assertFalse(all(c).contains("K:"), "ohne die Tasten-Zeile: " + c.strings());
+			assertFalse(c.shows("Von mir"));
+			// Die Marke bleibt, damit man zurückschalten kann – quer an der Stelle der Seitenzahl.
+			int[] chip = spot(ui, "filterChip");
+			assertNull(ui.testSpot("pos"));
+			assertNull(ui.testSpot("heart"));
+			assertTrue(c.strings().contains("Friends · New"), c.strings().toString());
+			PhoneLayout l = PhoneLayout.of(host.w, host.h, hold);
+			if (hold == PhoneHold.LANDSCAPE) assertEquals(l.screenX + Math.round(12 * l.q), textOf(c, "Friends · New").x - Math.round(8 * l.q), 1e-6);
+			assertNotNull(spot(ui, "camera"), "die Kamera bleibt erreichbar");
+			click(ui, "filterChip");
+			assertEquals(PhoneUi.Sheet.FILTER, ui.testSheet());
+			frame(ui);
+			click(ui, "filterAll");
+			assertTrue(frame(ui).shows("Von mir"));
+			assertTrue(chip[3] > 0);
+			ui.dispose();
+		}
+		// „Ich“ ohne eigene Fotos.
+		host.name = "Niemand";
+		modules.reels.feedFilter.set(FeedFilter.MINE);
+		PhoneUi ui = ui(PhoneHold.LANDSCAPE);
+		RecCanvas c = frame(ui);
+		assertTrue(c.strings().contains(I18n.tr("reels.empty.mine")), c.strings().toString());
+		assertTrue(all(c).contains(I18n.tr("reels.empty.hint")));
+		spot(ui, "filterChip");
+		ui.dispose();
+	}
+
+	@Test
+	void friendPostsShowWhenTheHostKnowsFriends() {
+		post("Von mir", host.name, 5, false);
+		post("Von Rotkäppchen", "Rotkaeppchen", 3, false);
+		post("Von Fremden", "Fremder", 2, false);
+		host.friends = java.util.Arrays.asList("ROTKAEPPCHEN", "Steve_Baut");
+		modules.reels.feedFilter.set(FeedFilter.FRIENDS);
+		PhoneUi ui = ui(PhoneHold.LANDSCAPE);
+		RecCanvas c = frame(ui);
+		assertTrue(c.shows("Von Rotkäppchen") && c.shows("1 / 1"), "Namen ohne Groß-/Kleinschreibung: " + c.strings());
+		// Die Liste ändert sich, während das Handy draußen ist.
+		host.friends = java.util.Arrays.asList("Fremder", "Rotkaeppchen");
+		c = frame(ui);
+		assertTrue(c.shows("Von Rotkäppchen") && c.shows("2 / 2"), "das Foto im Bild bleibt: " + c.strings());
+		host.friends = new ArrayList<String>();
+		c = frame(ui);
+		assertTrue(c.strings().contains(I18n.tr("reels.empty.friends")));
+		// Unbekannt (TRS Online hat die Liste nie geladen) ist wie leer.
+		host.friends = null;
+		assertTrue(frame(ui).strings().contains(I18n.tr("reels.empty.friends")));
+		ui.dispose();
+		// Unter „Alle“ wird die Liste gar nicht erst gelesen.
+		modules.reels.feedFilter.set(FeedFilter.ALL);
+		int calls = host.friendCalls;
+		ui = ui(PhoneHold.LANDSCAPE);
+		frame(ui);
+		frame(ui);
+		assertEquals(calls, host.friendCalls);
+		ui.dispose();
+	}
+
+	@Test
+	void emptyBackendFeedShowsNoChipAndTabDoesNothing() {
+		modules.reels.feedFilter.set(FeedFilter.MINE);
+		for (PhoneHold hold : PhoneHold.values()) {
+			PhoneUi ui = ui(hold);
+			RecCanvas c = frame(ui);
+			assertNull(ui.testSpot("filterChip"), hold + ": ganz leerer Feed: keine Marke");
+			assertTrue(c.shows(I18n.tr("reels.empty")), "und der Text wie immer: " + c.strings());
+			assertTrue(all(c).contains("K:"), "mit der Tasten-Zeile");
+			ui.inputKey(0, UiKey.TAB, false);
+			assertEquals(PhoneUi.Sheet.NONE, ui.testSheet());
+			ui.dispose();
+		}
+	}
+
+	@Test
+	void postingWhileFilteredToFriendsSwitchesBackToAll() {
+		post("Alt", host.name, 30, false);
+		modules.reels.feedFilter.set(FeedFilter.FRIENDS);
+		PhoneUi ui = camera(PhoneHold.PORTRAIT);
+		shoot(ui);
+		for (char ch : "Neu".toCharArray()) ui.inputChar(ch);
+		armPost(ui);
+		ui.keyPressed(0, UiKey.ENTER, false);
+		assertEquals(FeedFilter.ALL, ui.testFilter(), "sonst wäre der neue Post nicht zu sehen");
+		assertEquals(FeedFilter.ALL, modules.reels.feedFilter.get());
+		assertEquals(0, ui.testPage());
+		RecCanvas c = frame(ui);
+		assertTrue(c.shows("Neu") && c.shows("1 / 2"), c.strings().toString());
+		ui.dispose();
+	}
+
+	@Test
+	void newPostIsInViewUnderPopularToo() {
+		ReelsPost liked = post("Beliebt", host.name, 30, false);
+		backend.toggleLike(liked.id);
+		modules.reels.feedSort.set(FeedSort.POPULAR);
+		modules.reels.feedFilter.set(FeedFilter.MINE);
+		PhoneUi ui = camera(PhoneHold.PORTRAIT);
+		shoot(ui);
+		for (char ch : "Neu".toCharArray()) ui.inputChar(ch);
+		armPost(ui);
+		ui.keyPressed(0, UiKey.ENTER, false);
+		assertEquals(FeedSort.POPULAR, ui.testSort(), "die Reihenfolge bleibt");
+		assertEquals(FeedFilter.MINE, ui.testFilter(), "unter „Ich“ ist der eigene Post ohnehin zu sehen");
+		assertEquals(1, ui.testPage(), "ohne Likes steht der neue Post hinten – der Feed zeigt ihn trotzdem");
+		RecCanvas c = frame(ui);
+		assertTrue(c.shows("Neu") && c.shows("2 / 2"), c.strings().toString());
+		ui.dispose();
+	}
+
+	@Test
+	void tabOpensAndEscEnterTabCloseTheFilterSheet() {
+		post("Schaut mal!", host.name, 2, false);
+		PhoneUi ui = feed(PhoneHold.LANDSCAPE);
+		for (UiKey close : new UiKey[]{UiKey.ESCAPE, UiKey.ENTER, UiKey.TAB}) {
+			assertTrue(ui.inputKey(0, UiKey.TAB, false));
+			assertEquals(PhoneUi.Sheet.FILTER, ui.testSheet(), "Tab öffnet „Feed“");
+			frame(ui);
+			assertTrue(ui.inputKey(0, close, false), close + " ist verbraucht");
+			assertEquals(PhoneUi.Sheet.NONE, ui.testSheet(), close + " schließt");
+			assertEquals(PhoneUi.View.FEED, ui.testView(), close + " öffnet nicht die Kommentare");
+			assertFalse(ui.isClosing());
+			frame(ui);
+		}
+		ui.dispose();
+	}
+
+	@Test
+	void arrowKeysChangeFilterAndSortInTheSheet() {
+		post("Älter", host.name, 5, false);
+		post("Neuer", host.name, 2, false);
+		PhoneUi ui = feed(PhoneHold.LANDSCAPE);
+		ui.inputKey(0, UiKey.TAB, false);
+		ui.inputKey(0, UiKey.RIGHT, false);
+		assertEquals(FeedFilter.FRIENDS, ui.testFilter());
+		ui.inputKey(0, UiKey.RIGHT, false);
+		assertEquals(FeedFilter.MINE, ui.testFilter());
+		ui.inputKey(0, UiKey.RIGHT, false);
+		assertEquals(FeedFilter.MINE, ui.testFilter(), "am Ende ist Schluss");
+		ui.inputKey(0, UiKey.LEFT, false);
+		assertEquals(FeedFilter.FRIENDS, ui.testFilter());
+		ui.inputKey(0, UiKey.LEFT, false);
+		ui.inputKey(0, UiKey.LEFT, false);
+		assertEquals(FeedFilter.ALL, ui.testFilter());
+		ui.inputKey(0, UiKey.DOWN, false);
+		assertEquals(FeedSort.POPULAR, ui.testSort());
+		ui.inputKey(0, UiKey.DOWN, false);
+		assertEquals(FeedSort.POPULAR, ui.testSort());
+		ui.inputKey(0, UiKey.UP, false);
+		assertEquals(FeedSort.NEWEST, ui.testSort());
+		assertEquals(0, ui.testPage(), "die Pfeile blättern dabei nicht");
+		assertEquals(PhoneUi.Sheet.FILTER, ui.testSheet());
+		assertEquals(FeedFilter.ALL, modules.reels.feedFilter.get());
+		ui.dispose();
+	}
+
+	@Test
+	void lastPhotoIgnoresTheFilter() throws IOException {
+		postWithPhoto(160, 90, 5);
+		String me = host.name;
+		host.name = "Rotkaeppchen";
+		postWithPhoto(90, 160, 1);
+		host.name = me;
+		modules.reels.feedFilter.set(FeedFilter.MINE);
+		PhoneUi ui = feed(PhoneHold.PORTRAIT);
+		frame(ui);
+		RecCanvas c = frame(ui);
+		assertTrue(c.shows("Foto 160x90") && c.shows("1 / 1"), c.strings().toString());
+		String own = photoTexture(c);
+		// Das kleine Bild neben dem Auslöser ist das neueste Foto im ganzen Feed – der Filter zählt dort nicht.
+		click(ui, "camera");
+		frame(ui);
+		frame(ui);
+		c = frame(ui);
+		String thumb = photoTexture(c);
+		assertFalse(own.equals(thumb), "nicht das gefilterte eigene Foto");
+		ui.keyPressed(0, UiKey.ESCAPE, false);
+		ui.setFilter(FeedFilter.ALL);
+		ui.pages();
+		frame(ui);
+		frame(ui);
+		c = frame(ui);
+		assertTrue(c.shows("Foto 160x90"), "das Foto im Bild bleibt beim Umschalten");
+		ui.inputScroll(0, 0, 1);
+		frame(ui);
+		c = frame(ui);
+		assertTrue(c.shows("Foto 90x160"));
+		assertEquals(thumb, photoTexture(c), "das neueste Foto im Feed");
+		ui.dispose();
+	}
+
+	@Test
+	void filterIsRememberedByTheNextPhone() {
+		post("Schaut mal!", host.name, 2, false);
+		PhoneUi ui = feed(PhoneHold.LANDSCAPE);
+		assertEquals(FeedFilter.ALL, ui.testFilter());
+		assertEquals(FeedSort.NEWEST, ui.testSort());
+		ui.setFilter(FeedFilter.MINE);
+		ui.setSort(FeedSort.POPULAR);
+		ui.dispose();
+		PhoneUi next = ui(PhoneHold.PORTRAIT);
+		assertEquals(FeedFilter.MINE, next.testFilter());
+		assertEquals(FeedSort.POPULAR, next.testSort());
+		assertTrue(frame(next).strings().contains("Me · Popular"));
+		next.dispose();
+	}
+
+	// --- E: Streak-Schutz ---
+
+	private static final long DAY = 86400000L;
+
+	/** Zwei Schutztage im November sind schon eingelöst (10. und 11.), nach einem Post am 9. */
+	private void useBothProtections() {
+		post("Am Neunten", host.name, 4 * 24, false);
+		assertEquals(StreakGuard.Result.OK, backend.protect(false, NOON - 3 * DAY));
+		assertEquals(StreakGuard.Result.OK, backend.protect(false, NOON - 2 * DAY));
+	}
+
+	/** Hat der Knopf an dieser Stelle den gelben Rahmen („Sicher? Nochmal tippen“)? */
+	private static boolean asks(RecCanvas c, int[] r) {
+		for (RecCanvas.Fill f : c.fills) {
+			if (f.argb == FeedView.AMBER_LINE && Math.abs(f.x1 - r[0]) < 0.01 && Math.abs(f.y1 - r[1]) < 0.01
+					&& Math.abs(f.x2 - r[0] - r[2]) < 0.01) return true;
+		}
+		return false;
+	}
+
+	/** Blatt „Streak“ öffnen und zeichnen. */
+	private RecCanvas streakSheet(PhoneUi ui) {
+		click(ui, "streak");
+		assertEquals(PhoneUi.Sheet.STREAK, ui.testSheet());
+		return frame(ui);
+	}
+
+	@Test
+	void flameOpensTheStreakSheetInTheFeedOnly() {
+		post("Heute", host.name, 2, false);
+		for (PhoneHold hold : PhoneHold.values()) {
+			PhoneUi ui = feed(hold);
+			int clicks = host.clicks;
+			RecCanvas c = streakSheet(ui);
+			assertEquals(clicks + 1, host.clicks, "Klick-Ton");
+			for (String s : new String[]{"streakSheet", "streakBack", "streakClose", "streakPause"}) spot(ui, s);
+			assertNull(ui.testSpot("streakRescue"), "nichts zu retten: kein zweiter Knopf");
+			assertTrue(c.strings().contains(I18n.tr("reels.streak.title")), c.strings().toString());
+			assertTrue(c.strings().contains(I18n.tr("reels.compose.streak.same.one", 1)), "„Streak: 1 day“: " + c.strings());
+			assertTrue(all(c).contains(I18n.tr("reels.streak.state.posted")), c.strings().toString());
+			assertTrue(all(c).contains(I18n.tr("reels.streak.left", 2, 2)), c.strings().toString());
+			assertTrue(all(c).contains(I18n.tr("reels.streak.rule")), c.strings().toString());
+			// Niedriger als das Kommentar-Blatt.
+			PhoneLayout l = PhoneLayout.of(host.w, host.h, hold);
+			assertTrue(spot(ui, "streakSheet")[3] < Math.round((hold == PhoneHold.LANDSCAPE ? 290 : 400) * l.q), hold.toString());
+			click(ui, "streakClose");
+			assertEquals(PhoneUi.Sheet.NONE, ui.testSheet());
+			frame(ui);
+			click(ui, "streak");
+			frame(ui);
+			click(ui, "streakBack");
+			assertEquals(PhoneUi.Sheet.NONE, ui.testSheet());
+
+			// Über den Kommentaren und in der Kamera ist die Flamme keine Klickfläche.
+			frame(ui);
+			click(ui, "comment");
+			frame(ui);
+			click(ui, "streak");
+			assertEquals(PhoneUi.Sheet.NONE, ui.testSheet(), hold + ": Kommentare");
+			ui.home();
+			frame(ui);
+			click(ui, "camera");
+			frame(ui);
+			int[] flame = spot(ui, "streak");
+			ui.inputClick((flame[0] + flame[2] / 2.0) / host.gui, (flame[1] + flame[3] / 2.0) / host.gui, 0);
+			assertEquals(PhoneUi.Sheet.NONE, ui.testSheet(), hold + ": Kamera");
+			assertEquals(PhoneUi.View.CAMERA, ui.testView());
+			ui.dispose();
+		}
+	}
+
+	@Test
+	void flameHitAreaIsAtLeastFortyPixelsInBothHolds() {
+		post("Heute", host.name, 2, false);
+		PhoneUi ui = feed(PhoneHold.LANDSCAPE);
+		assertArrayEquals(new int[]{975, 0, 68, 45}, onPhone(ui, "streak"), "quer: endet genau an der Klickfläche des Herzens");
+		ui.dispose();
+		ui = feed(PhoneHold.PORTRAIT);
+		assertArrayEquals(new int[]{330, 0, 53, 44}, onPhone(ui, "streak"));
+		ui.dispose();
+		for (PhoneHold hold : PhoneHold.values()) {
+			ui = feed(hold);
+			int[] flame = spot(ui, "streak");
+			assertTrue(flame[2] >= 40 && flame[3] >= 40, hold + ": " + flame[2] + "x" + flame[3]);
+			assertTrue(inside(flame, spot(ui, "screen")), hold.toString());
+			// In der Kamera bleibt es die schmale gemerkte Stelle.
+			click(ui, "camera");
+			frame(ui);
+			assertTrue(spot(ui, "streak")[2] < flame[2], hold + ": Kamera ohne Klickfläche");
+			ui.dispose();
+		}
+	}
+
+	@Test
+	void flameAndHeartHitAreasDoNotOverlap() {
+		post("Heute", host.name, 2, false);
+		int[][] windows = {{1920, 1080}, {1280, 720}};
+		for (int[] win : windows) {
+			for (PhoneHold hold : PhoneHold.values()) {
+				host.size(win[0], win[1], 2);
+				PhoneUi ui = feed(hold);
+				String tag = hold + " " + win[0] + "x" + win[1];
+				int[] flame = spot(ui, "streak"), heart = spot(ui, "heart");
+				assertFalse(overlap(flame, heart), tag + ": Flamme " + flame[1] + "+" + flame[3] + ", Herz ab " + heart[1]);
+				assertFalse(overlap(flame, spot(ui, "filterChip")), tag);
+				// Ein Klick auf die Flamme liked nicht, ein Klick aufs Herz öffnet kein Blatt.
+				click(ui, "heart");
+				assertEquals(PhoneUi.Sheet.NONE, ui.testSheet(), tag);
+				assertTrue(backend.feed().get(0).likedByMe, tag);
+				click(ui, "heart");
+				click(ui, "streak");
+				assertEquals(PhoneUi.Sheet.STREAK, ui.testSheet(), tag);
+				assertFalse(backend.feed().get(0).likedByMe, tag);
+				ui.dispose();
+			}
+		}
+	}
+
+	@Test
+	void firstTapArmsAndSecondTapUsesTheProtection() throws IOException {
+		post("Vorgestern", host.name, 50, false);
+		post("Gestern", host.name, 26, false);
+		PhoneUi ui = feed(PhoneHold.LANDSCAPE);
+		RecCanvas c = streakSheet(ui);
+		assertTrue(all(c).contains(I18n.tr("reels.streak.state.open")), c.strings().toString());
+		assertTrue(c.strings().contains(I18n.tr("reels.streak.pause")));
+		assertEquals(FeedView.RED_BUTTON, fillAt(c, spot(ui, "streakPause")).argb, "möglich: rot");
+		PhoneLayout l = PhoneLayout.of(host.w, host.h, PhoneHold.LANDSCAPE);
+		assertEquals(l.screenW - 2 * Math.round(14 * l.q), spot(ui, "streakPause")[2], "ohne „Gestern retten“ über die ganze Breite");
+		assertTrue(spot(ui, "streakPause")[3] >= 40);
+
+		// Erster Druck: der Knopf fragt nur nach.
+		click(ui, "streakPause");
+		assertFalse(ui.testStreakGuard().todayFrozen, "noch nichts eingelöst");
+		c = frame(ui);
+		assertTrue(c.strings().contains(I18n.tr("reels.streak.confirm")), c.strings().toString());
+		assertFalse(c.strings().contains(I18n.tr("reels.streak.pause")));
+		assertTrue(asks(c, spot(ui, "streakPause")), "gelber Rahmen");
+		assertEquals(PhoneUi.Sheet.STREAK, ui.testSheet());
+
+		// Zweiter Druck nach der Wartezeit: eingelöst.
+		ui.testTicker += PhoneUi.POST_GUARD_MS;
+		frame(ui);
+		click(ui, "streakPause");
+		StreakGuard g = ui.testStreakGuard();
+		assertTrue(g.todayFrozen, "heute ist geschützt");
+		assertEquals(1, g.leftThisMonth);
+		assertEquals(2, g.streak, "ein geschützter Tag zählt nicht mit, hält aber die Streak");
+		assertEquals(PhoneUi.Sheet.NONE, ui.testSheet(), "das Blatt schließt");
+		assertEquals(I18n.tr("reels.toast.streak.paused"), ui.testToast());
+		frame(ui);
+		// Wieder offen: pausiert, und kein zweites Mal möglich.
+		ui.testTicker += PhoneUi.TOAST_MS + 1;
+		frame(ui);
+		c = streakSheet(ui);
+		assertTrue(all(c).contains(I18n.tr("reels.streak.state.paused")), c.strings().toString());
+		assertTrue(all(c).contains(I18n.tr("reels.streak.left", 1, 2)), c.strings().toString());
+		assertEquals(ComposeView.BUTTON_GREY, fillAt(c, spot(ui, "streakPause")).argb);
+		click(ui, "streakPause");
+		ui.testTicker += PhoneUi.POST_GUARD_MS;
+		frame(ui);
+		click(ui, "streakPause");
+		assertEquals(1, ui.testStreakGuard().leftThisMonth);
+		ui.dispose();
+		// Gesichert: nach dem Neustart ist der Tag noch geschützt.
+		LocalReelsBackend read = new LocalReelsBackend(tmp, UTC);
+		assertTrue(read.streakGuard(NOON).todayFrozen);
+		assertEquals(2, read.streak(NOON + DAY), "morgen läuft die Streak noch");
+	}
+
+	@Test
+	void doubleClickDoesNotUseAProtection() {
+		post("Gestern", host.name, 26, false);
+		PhoneUi ui = feed(PhoneHold.PORTRAIT);
+		streakSheet(ui);
+		click(ui, "streakPause");
+		click(ui, "streakPause");
+		assertFalse(ui.testStreakGuard().todayFrozen, "Doppelklick im selben Augenblick");
+		ui.testTicker += PhoneUi.POST_GUARD_MS - 1;
+		RecCanvas c = frame(ui);
+		click(ui, "streakPause");
+		assertFalse(ui.testStreakGuard().todayFrozen, "1 ms vor Ablauf noch nicht");
+		assertEquals(PhoneUi.Sheet.STREAK, ui.testSheet());
+		assertTrue(c.strings().contains(I18n.tr("reels.streak.confirm")), "der Knopf fragt weiter nach");
+		assertEquals(2, ui.testStreakGuard().leftThisMonth);
+		ui.testTicker += 1;
+		frame(ui);
+		click(ui, "streakPause");
+		assertTrue(ui.testStreakGuard().todayFrozen);
+		ui.dispose();
+	}
+
+	@Test
+	void heldEnterDoesNotUseAProtection() {
+		post("Gestern", host.name, 26, false);
+		PhoneUi ui = feed(PhoneHold.LANDSCAPE);
+		streakSheet(ui);
+		// Enter drückt „Heute pausieren“ – und bleibt unten (Tastenwiederholung).
+		host.down.add("key.keyboard.enter");
+		assertTrue(ui.inputKey(0, UiKey.ENTER, false));
+		RecCanvas c = frame(ui);
+		assertTrue(c.strings().contains(I18n.tr("reels.streak.confirm")), "Enter fragt nach: " + c.strings());
+		for (int i = 0; i < 4; i++) {
+			ui.testTicker += PhoneUi.POST_GUARD_MS;
+			frame(ui);
+			ui.inputKey(0, UiKey.ENTER, false);
+		}
+		assertFalse(ui.testStreakGuard().todayFrozen, "gehaltenes Enter löst nichts ein – auch nicht nach der Wartezeit");
+		assertEquals(PhoneUi.View.FEED, ui.testView());
+		assertEquals(PhoneUi.Sheet.STREAK, ui.testSheet());
+		// Losgelassen und neu gedrückt: jetzt gilt Enter als zweiter Druck.
+		host.down.clear();
+		frame(ui);
+		ui.inputKey(0, UiKey.ENTER, false);
+		assertTrue(ui.testStreakGuard().todayFrozen, "losgelassen und neu gedrückt: eingelöst");
+		assertEquals(PhoneUi.Sheet.NONE, ui.testSheet());
+		ui.dispose();
+	}
+
+	@Test
+	void armingExpiresAfterThreeSeconds() {
+		post("Gestern", host.name, 26, false);
+		PhoneUi ui = feed(PhoneHold.LANDSCAPE);
+		streakSheet(ui);
+		click(ui, "streakPause");
+		ui.testTicker += PhoneUi.STREAK_CONFIRM_MS - 1;
+		assertTrue(frame(ui).strings().contains(I18n.tr("reels.streak.confirm")));
+		ui.testTicker += 1;
+		RecCanvas c = frame(ui);
+		assertTrue(c.strings().contains(I18n.tr("reels.streak.pause")), "nach drei Sekunden steht der Knopf wieder normal da");
+		assertFalse(asks(c, spot(ui, "streakPause")), "ohne gelben Rahmen");
+		// Der nächste Druck ist wieder der erste.
+		click(ui, "streakPause");
+		assertFalse(ui.testStreakGuard().todayFrozen);
+		assertTrue(frame(ui).strings().contains(I18n.tr("reels.streak.confirm")));
+		// Auch das Schließen des Blatts nimmt die Nachfrage zurück.
+		ui.closeSheet();
+		ui.testTicker += PhoneUi.POST_GUARD_MS;
+		frame(ui);
+		streakSheet(ui);
+		click(ui, "streakPause");
+		assertFalse(ui.testStreakGuard().todayFrozen);
+		ui.dispose();
+	}
+
+	@Test
+	void pauseIsNotPossibleAfterPostingToday() {
+		post("Gestern", host.name, 26, false);
+		post("Heute", host.name, 2, false);
+		PhoneUi ui = feed(PhoneHold.PORTRAIT);
+		RecCanvas c = streakSheet(ui);
+		assertTrue(all(c).contains(I18n.tr("reels.streak.state.posted")), c.strings().toString());
+		assertEquals(ComposeView.BUTTON_GREY, fillAt(c, spot(ui, "streakPause")).argb, "grau");
+		assertEquals(FeedView.TEXT_DIM, textOf(c, I18n.tr("reels.streak.pause")).argb, "blasse Schrift");
+		click(ui, "streakPause");
+		ui.inputKey(0, UiKey.ENTER, false);
+		c = frame(ui);
+		assertFalse(c.strings().contains(I18n.tr("reels.streak.confirm")), "der Knopf ruht");
+		ui.testTicker += PhoneUi.POST_GUARD_MS;
+		frame(ui);
+		click(ui, "streakPause");
+		ui.inputKey(0, UiKey.ENTER, false);
+		assertFalse(ui.testStreakGuard().todayFrozen);
+		assertEquals(2, ui.testStreakGuard().leftThisMonth);
+		assertEquals(PhoneUi.Sheet.STREAK, ui.testSheet());
+		ui.dispose();
+	}
+
+	@Test
+	void rescueButtonAppearsOnlyTheDayAfterAMissedDay() {
+		// Gestern und heute gepostet: nichts zu retten.
+		post("Gestern", host.name, 26, false);
+		post("Heute", host.name, 2, false);
+		PhoneUi ui = feed(PhoneHold.LANDSCAPE);
+		streakSheet(ui);
+		assertNull(ui.testSpot("streakRescue"));
+		ui.dispose();
+
+		// Vorgestern und davor gepostet, gestern nicht: „Gestern retten“ steht neben „Heute pausieren“.
+		backend = new LocalReelsBackend(tmp.resolve("b"), UTC);
+		reels = Reels.forTest(modules, backend, DIRECT, UTC);
+		post("Vor drei Tagen", host.name, 74, false);
+		post("Vorgestern", host.name, 50, false);
+		for (PhoneHold hold : PhoneHold.values()) {
+			ui = feed(hold);
+			RecCanvas c = streakSheet(ui);
+			int[] pause = spot(ui, "streakPause"), rescue = spot(ui, "streakRescue");
+			assertTrue(c.strings().contains(I18n.tr("reels.streak.rescue")), c.strings().toString());
+			if (hold == PhoneHold.LANDSCAPE) {
+				assertEquals(pause[1], rescue[1], "quer: nebeneinander");
+				assertTrue(pause[0] + pause[2] < rescue[0]);
+			} else {
+				assertTrue(rescue[1] >= pause[1] + pause[3], "hochkant: untereinander");
+			}
+			assertTrue(rescue[3] >= 40 && pause[3] >= 40);
+			assertTrue(inside(rescue, spot(ui, "streakSheet")));
+			assertEquals(FeedView.RED_BUTTON, fillAt(c, rescue).argb);
+			// Ohne Streak gibt es heute nichts zu pausieren.
+			assertEquals(ComposeView.BUTTON_GREY, fillAt(c, pause).argb);
+			PhoneLayout l = PhoneLayout.of(host.w, host.h, hold);
+			assertTrue(spot(ui, "streakSheet")[3] < Math.round((hold == PhoneHold.LANDSCAPE ? 290 : 400) * l.q), hold + ": niedriger als die Kommentare");
+			ui.dispose();
+		}
+
+		// Zwei Tage verpasst: ein Schutz für gestern brächte nichts – kein Knopf.
+		backend = new LocalReelsBackend(tmp.resolve("c"), UTC);
+		reels = Reels.forTest(modules, backend, DIRECT, UTC);
+		post("Vor vier Tagen", host.name, 98, false);
+		post("Vor drei Tagen", host.name, 74, false);
+		ui = feed(PhoneHold.LANDSCAPE);
+		RecCanvas c = streakSheet(ui);
+		assertNull(ui.testSpot("streakRescue"));
+		assertTrue(all(c).contains(I18n.tr("reels.streak.state.none")), c.strings().toString());
+		assertNull(ui.testToast(), "und kein Hinweis beim Herausholen");
+		ui.dispose();
+	}
+
+	@Test
+	void stateTextSaysWhatTheRescueBringsBack() {
+		post("Vor vier Tagen", host.name, 98, false);
+		post("Vor drei Tagen", host.name, 74, false);
+		post("Vorgestern", host.name, 50, false);
+		post("Heute", host.name, 2, false);
+		for (PhoneHold hold : PhoneHold.values()) {
+			PhoneUi ui = feed(hold);
+			RecCanvas c = streakSheet(ui);
+			assertEquals("Yesterday is missing. A protection brings your streak from 1 back to 4.", I18n.tr("reels.streak.state.broken", 1, 4));
+			assertTrue(all(c).contains(I18n.tr("reels.streak.state.broken", 1, 4)), hold + ": " + c.strings());
+			StreakGuard g = ui.testStreakGuard();
+			assertEquals(1, g.streak);
+			assertEquals(4, g.streakIfRescued);
+			assertTrue(g.canRescueYesterday);
+			assertFalse(g.canPauseToday, "heute ist schon gepostet");
+			ui.dispose();
+		}
+	}
+
+	@Test
+	void stateTextSaysWhenNoProtectionIsLeftForYesterday() {
+		useBothProtections();
+		PhoneUi ui = feed(PhoneHold.LANDSCAPE);
+		assertNull(ui.testToast(), "nichts mehr zu retten: kein Hinweis");
+		RecCanvas c = streakSheet(ui);
+		StreakGuard g = ui.testStreakGuard();
+		assertTrue(g.rescueOffered && !g.canRescueYesterday, "gestern fehlt, aber der Monat ist aufgebraucht");
+		assertEquals(0, g.leftForYesterday);
+		assertTrue(all(c).contains(I18n.tr("reels.streak.state.missed")), c.strings().toString());
+		assertTrue(all(c).contains(I18n.tr("reels.streak.left", 0, 2)), c.strings().toString());
+		// „Gestern retten“ steht da, ruht aber.
+		assertEquals(ComposeView.BUTTON_GREY, fillAt(c, spot(ui, "streakRescue")).argb);
+		assertEquals(FeedView.TEXT_DIM, textOf(c, I18n.tr("reels.streak.rescue")).argb);
+		click(ui, "streakRescue");
+		ui.testTicker += PhoneUi.POST_GUARD_MS;
+		frame(ui);
+		click(ui, "streakRescue");
+		ui.inputKey(0, UiKey.ENTER, false);
+		assertFalse(ui.testStreakGuard().yesterdayFrozen);
+		ui.dispose();
+	}
+
+	@Test
+	void rescueRaisesTheShownStreakAtOnce() {
+		post("Vor drei Tagen", host.name, 74, false);
+		post("Vorgestern", host.name, 50, false);
+		post("Heute", host.name, 2, false);
+		PhoneUi ui = feed(PhoneHold.LANDSCAPE);
+		RecCanvas c = frame(ui);
+		assertNotNull(textOf(c, "1"), "Streak 1: " + c.strings());
+		streakSheet(ui);
+		click(ui, "streakRescue");
+		assertEquals(1, backend.streak(NOON), "der erste Druck ändert nichts");
+		ui.testTicker += PhoneUi.POST_GUARD_MS;
+		frame(ui);
+		click(ui, "streakRescue");
+		assertEquals(3, backend.streak(NOON));
+		assertEquals(PhoneUi.Sheet.NONE, ui.testSheet());
+		assertEquals(I18n.tr("reels.toast.streak.rescued", 3), ui.testToast());
+		assertEquals("Rescued! Streak: 3 days", ui.testToast());
+		c = frame(ui);
+		assertNotNull(textOf(c, "3"), "die Kopfzeile zeigt sofort 3: " + c.strings());
+		assertNull(textOf(c, "1"));
+		StreakGuard g = ui.testStreakGuard();
+		assertTrue(g.yesterdayFrozen);
+		assertEquals(1, g.leftForYesterday);
+		// Blatt wieder auf: „Gestern retten“ ist weg.
+		ui.testTicker += PhoneUi.TOAST_MS + 1;
+		frame(ui);
+		streakSheet(ui);
+		assertNull(ui.testSpot("streakRescue"));
+		ui.dispose();
+
+		// Ein Tag: eigene Fassung.
+		backend = new LocalReelsBackend(tmp.resolve("einer"), UTC);
+		reels = Reels.forTest(modules, backend, DIRECT, UTC);
+		post("Vorgestern", host.name, 50, false);
+		ui = feed(PhoneHold.PORTRAIT);
+		streakSheet(ui);
+		click(ui, "streakRescue");
+		ui.testTicker += PhoneUi.POST_GUARD_MS;
+		frame(ui);
+		click(ui, "streakRescue");
+		assertEquals(I18n.tr("reels.toast.streak.rescued.one", 1), ui.testToast());
+		ui.dispose();
+	}
+
+	@Test
+	void rescuableToastShowsOncePerDay() {
+		post("Vor drei Tagen", host.name, 74, false);
+		post("Vorgestern", host.name, 50, false);
+		post("Heute", host.name, 2, false);
+		PhoneUi first = feed(PhoneHold.PORTRAIT);
+		assertEquals(I18n.tr("reels.toast.streak.rescuable"), first.testToast(), "beim Herausholen: gestern lässt sich retten");
+		RecCanvas c = frame(first);
+		assertNotNull(first.testSpot("toast"));
+		assertTrue(all(c).contains(I18n.tr("reels.toast.streak.rescuable")), "ganz zu lesen: " + c.strings());
+		// Die Meldung steht unter der Marke im Kopf, nicht darauf.
+		RecCanvas.Text chip = textOf(c, "All · New");
+		assertTrue(spot(first, "toast")[1] >= chip.y + chip.h, "unter der Filter-Marke");
+		first.dispose();
+		PhoneUi second = feed(PhoneHold.PORTRAIT);
+		assertNull(second.testToast(), "am selben Tag nicht noch einmal");
+		second.dispose();
+
+		// Eine Antwort auf einen Klick ersetzt die Meldung sofort; was von selbst kommt, wartet.
+		reels = Reels.forTest(modules, backend, DIRECT, UTC);
+		PhoneUi ui = feed(PhoneHold.LANDSCAPE);
+		assertEquals(I18n.tr("reels.toast.streak.rescuable"), ui.testToast(), "nach einem Neustart des Spiels noch einmal");
+		ui.announce("Zweite", null);
+		ui.announce("Dritte", null);
+		ui.announce("Vierte", null);
+		ui.announce("Fünfte – zu viel", null);
+		assertEquals(I18n.tr("reels.toast.streak.rescuable"), ui.testToast(), "die laufende bleibt stehen");
+		ui.testTicker += PhoneUi.TOAST_MS;
+		frame(ui);
+		assertEquals("Zweite", ui.testToast());
+		ui.toast("Direkt");
+		assertEquals("Direkt", ui.testToast());
+		ui.testTicker += PhoneUi.TOAST_MS;
+		frame(ui);
+		assertEquals("Dritte", ui.testToast(), "die wartende kommt danach");
+		assertNull(ui.testSpot("toast") == null ? "fehlt" : null, "sie wird gezeichnet");
+		ui.testTicker += PhoneUi.TOAST_MS;
+		frame(ui);
+		assertEquals("Vierte", ui.testToast());
+		ui.testTicker += PhoneUi.TOAST_MS;
+		frame(ui);
+		assertNull(ui.testToast(), "höchstens drei warten");
+		ui.dispose();
+
+		// Am nächsten Tag ist „gestern“ ein Tag mit Post: nichts zu retten, keine Meldung.
+		reels = Reels.forTest(modules, backend, DIRECT, UTC);
+		PhoneUi next = ui(PhoneHold.PORTRAIT);
+		next.testNow = NOON + DAY;
+		next.testTicker = 5000;
+		frame(next);
+		assertNull(next.testToast());
+		next.dispose();
+	}
+
+	@Test
+	void noProtectionLeftShowsWhy() {
+		useBothProtections();
+		post("Gestern", host.name, 26, false);
+		PhoneUi ui = feed(PhoneHold.PORTRAIT);
+		RecCanvas c = streakSheet(ui);
+		StreakGuard g = ui.testStreakGuard();
+		assertEquals(2, g.streak, "9. und 12., dazwischen zwei geschützte Tage");
+		assertFalse(g.canPauseToday);
+		assertEquals(0, g.leftThisMonth);
+		assertTrue(all(c).contains(I18n.tr("reels.streak.left", 0, 2)), c.strings().toString());
+		assertTrue(all(c).contains(I18n.tr("reels.streak.state.open")), c.strings().toString());
+		assertEquals(ComposeView.BUTTON_GREY, fillAt(c, spot(ui, "streakPause")).argb);
+		click(ui, "streakPause");
+		ui.testTicker += PhoneUi.POST_GUARD_MS;
+		frame(ui);
+		click(ui, "streakPause");
+		assertFalse(ui.testStreakGuard().todayFrozen);
+		ui.dispose();
+
+		// Die Uhr steht hinter dem neuesten Post: dann sagt die Zeile das.
+		PhoneUi back = ui(PhoneHold.LANDSCAPE);
+		back.testNow = NOON - 3 * DAY;
+		back.testTicker = 5000;
+		frame(back);
+		c = streakSheet(back);
+		assertTrue(back.testStreakGuard().clockBehind);
+		assertTrue(all(c).contains(I18n.tr("reels.streak.clock")), c.strings().toString());
+		assertFalse(all(c).contains(I18n.tr("reels.streak.left", 0, 2)));
+		assertEquals(ComposeView.BUTTON_GREY, fillAt(c, spot(back, "streakPause")).argb);
+		back.dispose();
+	}
+
+	@Test
+	void secondWindowShowsWhyAndChangesNothing() throws IOException {
+		post("Vor drei Tagen", host.name, 74, false);
+		post("Vorgestern", host.name, 50, false);
+		post("Gestern", host.name, 26, false);
+		backend.flush();
+		byte[] before = Files.readAllBytes(tmp.resolve("feed.json"));
+		List<ReelsPost> feed = backend.feed();
+		reels = Reels.forTest(modules, secondWindow(backend), DIRECT, UTC);
+		PhoneUi ui = feed(PhoneHold.LANDSCAPE);
+		RecCanvas c = streakSheet(ui);
+		assertTrue(ui.testStreakGuard().readOnly);
+		assertTrue(all(c).contains(I18n.tr("reels.streak.readonly")), c.strings().toString());
+		assertFalse(all(c).contains(I18n.tr("reels.streak.left", 2, 2)));
+		assertEquals(ComposeView.BUTTON_GREY, fillAt(c, spot(ui, "streakPause")).argb);
+		click(ui, "streakPause");
+		ui.inputKey(0, UiKey.ENTER, false);
+		ui.testTicker += PhoneUi.POST_GUARD_MS;
+		frame(ui);
+		click(ui, "streakPause");
+		ui.inputKey(0, UiKey.ENTER, false);
+		assertEquals(PhoneUi.Sheet.STREAK, ui.testSheet());
+		ui.dispose();
+		assertTrue(feed == backend.feed(), "der Feed ist unverändert");
+		assertFalse(backend.streakGuard(NOON).todayFrozen);
+		assertTrue(java.util.Arrays.equals(before, Files.readAllBytes(tmp.resolve("feed.json"))));
+	}
+
+	@Test
+	void composeHintStaysCorrectWithAProtectedDay() {
+		post("Vorgestern", host.name, 50, false);
+		assertEquals(StreakGuard.Result.OK, backend.protect(false, NOON - DAY));
+		assertEquals(1, backend.streak(NOON), "gestern war geschützt: die Streak läuft noch");
+		PhoneUi ui = camera(PhoneHold.PORTRAIT);
+		shoot(ui);
+		RecCanvas c = frame(ui);
+		assertTrue(c.shows(I18n.tr("reels.compose.streak", 1, 2)), "„Streak: 1 → 2 days“: " + c.strings());
+		armPost(ui);
+		ui.keyPressed(0, UiKey.ENTER, false);
+		assertEquals(I18n.tr("reels.toast.posted", 2), ui.testToast());
+		ui.dispose();
+	}
+
+	@Test
+	void escClosesTheStreakSheetOnly() {
+		post("Gestern", host.name, 26, false);
+		PhoneUi ui = feed(PhoneHold.LANDSCAPE);
+		streakSheet(ui);
+		click(ui, "streakPause");
+		assertTrue(ui.inputKey(0, UiKey.ESCAPE, false), "Esc ist verbraucht");
+		assertEquals(PhoneUi.Sheet.NONE, ui.testSheet());
+		assertFalse(ui.isClosing());
+		assertEquals(PhoneUi.View.FEED, ui.testView());
+		assertFalse(ui.testStreakGuard().todayFrozen);
+		assertFalse(ui.inputKey(0, UiKey.ESCAPE, false), "das nächste Esc gehört dem Bildschirm der Version");
+		ui.dispose();
+	}
+
+	// --- Erstes Bild: der Feed merkt sich den Tag ---
+
+	@Test
+	void takingThePhoneOutRemembersTheDayOnceAndSavesIt() throws IOException {
+		post("Heute", host.name, 2, false);
+		backend.flush();
+		assertFalse(new String(Files.readAllBytes(tmp.resolve("feed.json")), java.nio.charset.StandardCharsets.UTF_8).contains("clockDay"));
+		PhoneUi ui = ui(PhoneHold.LANDSCAPE);
+		assertFalse(backend.dirty(), "vor dem ersten Bild ändert sich nichts");
+		frame(ui);
+		// Mit Posts im Feed merkt er sich den Tag – und sichert ihn gleich.
+		assertFalse(backend.dirty(), "gleich gesichert");
+		String json = new String(Files.readAllBytes(tmp.resolve("feed.json")), java.nio.charset.StandardCharsets.UTF_8);
+		assertTrue(json.contains("\"clockDay\": \"2026-11-13\"") || json.contains("\"clockDay\":\"2026-11-13\""), json);
+		byte[] once = Files.readAllBytes(tmp.resolve("feed.json"));
+		frame(ui);
+		ui.dispose();
+		PhoneUi again = feed(PhoneHold.PORTRAIT);
+		again.dispose();
+		assertTrue(java.util.Arrays.equals(once, Files.readAllBytes(tmp.resolve("feed.json"))), "am selben Tag nur einmal");
+		// Ein leerer Feed bleibt ungeschrieben.
+		Path empty = tmp.resolve("leer2");
+		backend = new LocalReelsBackend(empty, UTC);
+		reels = Reels.forTest(modules, backend, DIRECT, UTC);
+		PhoneUi ui2 = feed(PhoneHold.LANDSCAPE);
+		ui2.dispose();
+		assertFalse(Files.exists(empty.resolve("feed.json")));
 	}
 }
