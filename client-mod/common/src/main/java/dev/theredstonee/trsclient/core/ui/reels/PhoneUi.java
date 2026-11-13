@@ -5,14 +5,18 @@ import dev.theredstonee.trsclient.core.i18n.I18n;
 import dev.theredstonee.trsclient.core.input.KeyCombo;
 import dev.theredstonee.trsclient.core.module.KeySetting;
 import dev.theredstonee.trsclient.core.module.TrsModules;
+import dev.theredstonee.trsclient.core.qol.Qol;
 import dev.theredstonee.trsclient.core.reels.ArmRig;
+import dev.theredstonee.trsclient.core.reels.CommentThread;
 import dev.theredstonee.trsclient.core.reels.FeedFilter;
 import dev.theredstonee.trsclient.core.reels.FeedPager;
 import dev.theredstonee.trsclient.core.reels.FeedQuery;
 import dev.theredstonee.trsclient.core.reels.FeedSort;
+import dev.theredstonee.trsclient.core.reels.Mentions;
 import dev.theredstonee.trsclient.core.reels.PhoneHold;
 import dev.theredstonee.trsclient.core.reels.PhoneLayout;
 import dev.theredstonee.trsclient.core.reels.PhotoFrame;
+import dev.theredstonee.trsclient.core.reels.Pings;
 import dev.theredstonee.trsclient.core.reels.Reels;
 import dev.theredstonee.trsclient.core.reels.ReelsComment;
 import dev.theredstonee.trsclient.core.reels.ReelsExport;
@@ -35,6 +39,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Collection;
 import java.util.Collections;
@@ -56,9 +61,21 @@ import java.util.concurrent.RejectedExecutionException;
  * die Arme laufen immer unten aus dem Bild.
  *
  * <p>Reihenfolge: Schleier über dem Spiel, Arme (aus dem Skin, Innenseite vor Vorderseite), Schatten und Gehäuse, dann
- * der Bildschirm. Ansichten: Feed und Kommentare ({@link FeedView}), Kamera mit „Foto“ und „Selfie“
- * ({@link CameraView}) und „Neuer Post“ mit Text ({@link ComposeView}). „Handy drehen“ wechselt zwischen quer und
- * hochkant und merkt sich die Haltung.
+ * der Bildschirm. Ansichten: Feed ({@link FeedView}) mit dem Kommentar-Blatt ({@link CommentsView}), Kamera mit „Foto“
+ * und „Selfie“ ({@link CameraView}) und „Neuer Post“ mit Text ({@link ComposeView}). „Handy drehen“ wechselt zwischen
+ * quer und hochkant und merkt sich die Haltung.
+ *
+ * <p><b>Kommentare:</b> Enter sendet – je nach {@link CommentMode} als neuen Kommentar, als Antwort oder als Änderung
+ * eines eigenen Kommentars. Das Feld hat eine bewegliche Schreibmarke (Pfeile, Pos1, Ende, Entf; ein Emoji-Paar zählt
+ * als ein Zeichen). Wird {@code @} und ein Namensanfang getippt, stehen bis zu fünf Namen zur Wahl (Tab oder Klick
+ * vervollständigt, Pfeil hoch/runter wählt): aus diesem Post, vom Server, aus der Freundesliste und aus dem Feed – im
+ * Streamer-Modus ohne Server und Freunde. Esc verlässt erst den Modus, dann das Blatt. Das Mausrad blättert in den
+ * Kommentaren, nie im Feed. Das Blatt gehört zu einem Post: verschwindet der aus der Liste, schließt es sich.
+ *
+ * <p><b>Erwähnungen und Antworten</b> ({@link Pings}): ungesehene zählt die Marke am Kommentar-Symbol des Posts. Steigt
+ * ihre Zahl, kommt eine Meldung – einmal nach dem Spielstart und wieder bei einer neuen, nicht bei jedem Herausholen
+ * ({@link Reels#announcePings}); ein Klick darauf öffnet die Kommentare des Posts. Das Öffnen der Kommentare merkt sie
+ * als gesehen. Ohne Server kommt nichts von anderen an – das alles bleibt auf diesem PC.
  *
  * <p><b>Blätter über dem Feed</b> ({@link Sheet}, gezeichnet von {@link SheetView}): „Bild“ (speichern, kopieren, Ordner
  * öffnen), „Feed“ (Filter und Reihenfolge) und „Streak“ (Streak-Schutz). Solange eines offen ist, gehören Tasten und
@@ -206,6 +223,16 @@ public final class PhoneUi extends UiScreen {
 		STREAK
 	}
 
+	/** Was Enter im Kommentar-Blatt tut. */
+	public enum CommentMode {
+		/** Neuer Kommentar. */
+		NEW,
+		/** Antwort auf den Kommentar {@code commentTarget}. */
+		REPLY,
+		/** Der eigene Kommentar {@code commentTarget} wird geändert. */
+		EDIT
+	}
+
 	/** Eine Meldung, die wartet, bis die laufende vorbei ist. */
 	private static final class Note {
 		final String text;
@@ -258,6 +285,8 @@ public final class PhoneUi extends UiScreen {
 	static final long TOAST_MS = 3500L;
 	/** So viele Meldungen warten höchstens hinter der laufenden ({@link #announce}). */
 	static final int TOAST_QUEUE = 3;
+	/** So viele Namen stehen beim Tippen von {@code @} höchstens zur Wahl. */
+	static final int SUGGEST_MAX = 5;
 	/** Streak-Schutz: so lange gilt „Sicher? Nochmal tippen“. */
 	static final long STREAK_CONFIRM_MS = 3000L;
 	/** Blick drehen: Grad je Fensterpixel beim Ziehen und Grad je Pfeiltasten-Druck. */
@@ -274,7 +303,7 @@ public final class PhoneUi extends UiScreen {
 	private final Host host;
 	private final TrsModules modules;
 	private final FeedPager pager = new FeedPager();
-	private final FeedView feedView = new FeedView(this, new SheetView(this));
+	private final FeedView feedView = new FeedView(this, new SheetView(this), new CommentsView(this));
 	private final CameraView cameraView = new CameraView(this);
 	private final ComposeView composeView = new ComposeView(this);
 	private final PhoneVeil veil = new PhoneVeil();
@@ -282,8 +311,39 @@ public final class PhoneUi extends UiScreen {
 	private final Map<String, int[]> spots = new HashMap<String, int[]>();
 	/** Eingabefeld des Kommentar-Blatts. */
 	final TextInput commentInput = new TextInput(ReelsComment.MAX_TEXT);
-	/** Wie viele Kommentare das Blatt zuletzt gezeigt hat (Tests). */
+	/** Wie viele Kommentare das Blatt zuletzt gezeichnet hat (Tests). */
 	int commentsShown;
+	/** Anfang des Teils, den das Kommentarfeld zeigt ({@link PhoneText#window}); 0 nach dem Leeren oder Setzen. */
+	int commentFieldStart;
+	// --- Kommentar-Blatt ---
+	private CommentMode commentMode = CommentMode.NEW;
+	/** ID des Kommentars, der beantwortet bzw. bearbeitet wird (nur außerhalb von {@link CommentMode#NEW}). */
+	private String commentTarget;
+	/** Der Post, zu dem das offene Blatt gehört. */
+	private String commentsPostId;
+	/** Blättern in den Kommentaren: so viele Zeilen der Liste sind unten übersprungen. */
+	private final FeedPager commentScroll = new FeedPager();
+	/** Die Kommentare des Posts in Anzeige-Reihenfolge – gerechnet für diesen Feed und diesen Post. */
+	private List<CommentThread.Row> commentRows = Collections.<CommentThread.Row>emptyList();
+	private List<ReelsPost> commentRowsFeed;
+	private String commentRowsPost;
+	/** Der Namensanfang, für den die Vorschläge gerechnet wurden (null: es wird gerade kein Name getippt). */
+	private String suggestToken;
+	private List<String> suggestions = Collections.<String>emptyList();
+	private int suggestIndex;
+	/** Die Spieler auf dem Server – einmal gelesen, wenn ein Namensanfang auftaucht, und danach wieder vergessen. */
+	private List<String> suggestOnline;
+	/** Tests: Streamer-Modus an oder aus (null: wie im Spiel). */
+	Boolean testStreamer;
+	// --- Erwähnungen und Antworten ---
+	/** Zahl der ungesehenen im ganzen Feed – gerechnet für {@link #pingFeed}. */
+	private int unseenPings;
+	private List<ReelsPost> pingFeed;
+	private boolean pingsKnown;
+	/** Zahl der ungesehenen unter dem Post im Bild – gerechnet für diesen Feed und diesen Post. */
+	private int badgeCount;
+	private List<ReelsPost> badgeFeed;
+	private String badgePost;
 	/** Eingabefeld für den Text zum Foto („Neuer Post“). */
 	final TextInput captionInput = new TextInput(ReelsPost.MAX_CAPTION);
 
@@ -419,6 +479,8 @@ public final class PhoneUi extends UiScreen {
 		}
 		PhoneLayout l = layout;
 		refreshFeed();
+		checkCommentTarget();
+		checkPings();
 		if (photos != null) photos.frame();
 		cameraTick(l, raw.images());
 		trackEnter();
@@ -501,6 +563,7 @@ public final class PhoneUi extends UiScreen {
 		}
 		int at = pager.index();
 		String keep = at >= 0 && at < shown.size() ? shown.get(at).id : null;
+		boolean feedChanged = now != shownFeed;
 		feed = now;
 		shownFeed = now;
 		shownFilter = filter;
@@ -512,6 +575,15 @@ public final class PhoneUi extends UiScreen {
 		if (i >= 0 && i != pager.index()) pager.to(i);
 		// „Bild“ gehört zu einem Post: ohne Post kein Blatt.
 		if (sheet == Sheet.SAVE && shown.isEmpty()) closeSheet();
+		if (view != View.COMMENTS) return;
+		// Das Kommentar-Blatt gehört zu seinem Post: ist der nicht mehr im Bild, schließt es sich.
+		ReelsPost inView = shown.isEmpty() ? null : shown.get(Math.max(0, Math.min(shown.size() - 1, pager.index())));
+		if (inView == null || inView.id == null || !inView.id.equals(commentsPostId)) {
+			closeComments();
+		} else if (feedChanged && reels.markPingsSeen(inView.id, host.playerName()) > 0) {
+			// Was unter dem offenen Blatt ankommt, ist gleich gesehen – das hat den Feed noch einmal geändert.
+			refreshFeed();
+		}
 	}
 
 	/** Namen der Freunde in Kleinbuchstaben oder null (unbekannt) – je Bild höchstens einmal vom Baum geholt. */
@@ -612,6 +684,16 @@ public final class PhoneUi extends UiScreen {
 		return author != null && me != null && author.equalsIgnoreCase(me);
 	}
 
+	/** Name des Spielers (kann null sein, solange es keinen gibt). */
+	String selfName() {
+		return host.playerName();
+	}
+
+	/** Die Liste des Backends, mit der gerade gerechnet wird – ändert sich der Feed, ist es eine andere. */
+	Object feedIdentity() {
+		return shownFeed;
+	}
+
 	TextureRef skin() {
 		return host.skin();
 	}
@@ -678,29 +760,376 @@ public final class PhoneUi extends UiScreen {
 		host.click();
 	}
 
+	// --- Kommentare ---
+
+	/** Kommentare des Posts im Bild öffnen. Was ihn an Erwähnungen und Antworten betrifft, gilt damit als gesehen. */
 	void openComments() {
-		if (current() == null) return;
+		ReelsPost post = current();
+		if (post == null || disposed) return;
 		closeSheet();
 		view = View.COMMENTS;
-		commentInput.clear();
+		commentsPostId = post.id;
+		resetComments();
 		commentInput.setFocused(true);
+		reels.markPingsSeen(post.id, host.playerName());
 		host.click();
 	}
 
 	void closeComments() {
 		if (view != View.COMMENTS) return;
 		view = View.FEED;
+		commentsPostId = null;
+		resetComments();
 		commentInput.setFocused(false);
 	}
 
+	/** Feld leer, neuer Kommentar, nichts markiert, Liste ganz unten, keine Namensvorschläge. */
+	private void resetComments() {
+		commentMode = CommentMode.NEW;
+		commentTarget = null;
+		setCommentText("");
+		commentScroll.size(1);
+		commentScroll.to(0);
+	}
+
+	/** Text des Kommentarfelds setzen; die Schreibmarke steht danach am Ende. */
+	private void setCommentText(String text) {
+		commentInput.setText(text);
+		commentFieldStart = 0;
+		refreshSuggestions();
+	}
+
+	CommentMode commentMode() {
+		return commentMode;
+	}
+
+	String commentTargetId() {
+		return commentTarget;
+	}
+
+	/** Der Kommentar, der gerade beantwortet bzw. bearbeitet wird – null im Modus NEW oder wenn es ihn nicht mehr gibt. */
+	ReelsComment commentTarget(ReelsPost post) {
+		return commentMode == CommentMode.NEW ? null : commentById(post, commentTarget);
+	}
+
+	private static ReelsComment commentById(ReelsPost post, String id) {
+		if (post == null || post.comments == null || id == null) return null;
+		for (ReelsComment c : post.comments) if (c != null && id.equals(c.id)) return c;
+		return null;
+	}
+
+	/** Die Kommentare des Posts in Anzeige-Reihenfolge ({@link CommentThread}) – je Feed und Post einmal gerechnet. */
+	List<CommentThread.Row> commentRows(ReelsPost post) {
+		if (post == null) return Collections.<CommentThread.Row>emptyList();
+		if (shownFeed != commentRowsFeed || post.id == null || !post.id.equals(commentRowsPost)) {
+			commentRowsFeed = shownFeed;
+			commentRowsPost = post.id;
+			commentRows = CommentThread.rows(post.comments);
+		}
+		return commentRows;
+	}
+
+	/** So viele Zeilen der Kommentar-Liste sind unten übersprungen (0 = der neueste steht über dem Feld). */
+	int commentSkip() {
+		return commentScroll.index();
+	}
+
+	/** Wie weit sich blättern lässt: {@code size} − 1 Zeilen (setzt {@link CommentsView} je Bild). */
+	void commentScrollLimit(int size) {
+		commentScroll.size(Math.max(1, size));
+	}
+
+	/** So blättern, dass dieser Kommentar die unterste gezeichnete Zeile ist. */
+	private void scrollToComment(ReelsPost post, String commentId) {
+		List<CommentThread.Row> rows = commentRows(post);
+		for (int i = 0; i < rows.size(); i++) {
+			if (commentId != null && commentId.equals(rows.get(i).comment.id)) {
+				commentScroll.size(rows.size());
+				commentScroll.to(rows.size() - 1 - i);
+				return;
+			}
+		}
+	}
+
+	/** Klick auf das Feld: es bekommt den Fokus. Hat es ihn schon, bleibt die Schreibmarke, wo sie ist. */
+	void focusComment() {
+		if (!commentInput.focused()) commentInput.setFocused(true);
+	}
+
+	/**
+	 * „Antworten“ unter einem Kommentar. Geantwortet wird immer auf den Kommentar der obersten Ebene; steht der Klick
+	 * unter einer Antwort, kommt „@Name “ ihres Verfassers ins leere Feld – wenn das ein gültiger Spielername und nicht
+	 * der eigene ist.
+	 */
+	void startReply(String commentId) {
+		ReelsPost post = current();
+		ReelsComment c = commentById(post, commentId);
+		if (view != View.COMMENTS || c == null) return;
+		// Der alte Text einer angefangenen Bearbeitung ist kein Entwurf für eine Antwort.
+		if (commentMode == CommentMode.EDIT) setCommentText("");
+		commentMode = CommentMode.REPLY;
+		commentTarget = c.id;
+		if (c.replyTo != null && commentInput.isEmpty() && Mentions.validName(c.author) && !isSelf(c.author)) {
+			setCommentText("@" + c.author + " ");
+		}
+		scrollToComment(post, c.id);
+		focusComment();
+		host.click();
+	}
+
+	/** „Bearbeiten“ unter einem eigenen Kommentar: sein Text kommt ins Feld. */
+	void startEdit(String commentId) {
+		ReelsPost post = current();
+		ReelsComment c = commentById(post, commentId);
+		if (view != View.COMMENTS || c == null || !isSelf(c.author)) return;
+		commentMode = CommentMode.EDIT;
+		commentTarget = c.id;
+		setCommentText(c.text);
+		scrollToComment(post, c.id);
+		focusComment();
+		host.click();
+	}
+
+	/** Antworten bzw. Bearbeiten beenden (Kreuz der Leiste, Esc): der Text einer Antwort bleibt, der einer Bearbeitung geht. */
+	void cancelCommentMode() {
+		if (commentMode == CommentMode.NEW) return;
+		boolean edit = commentMode == CommentMode.EDIT;
+		commentMode = CommentMode.NEW;
+		commentTarget = null;
+		if (edit) setCommentText("");
+		host.click();
+	}
+
+	/** Gibt es den Kommentar nicht mehr, der beantwortet bzw. bearbeitet wird, gilt wieder „neuer Kommentar“ – der Text bleibt. */
+	private void checkCommentTarget() {
+		if (view != View.COMMENTS || commentMode == CommentMode.NEW) return;
+		if (commentTarget(current()) != null) return;
+		commentMode = CommentMode.NEW;
+		commentTarget = null;
+	}
+
+	/** Enter im Kommentar-Blatt: je nach Modus neuer Kommentar, Antwort oder Änderung. */
 	private void sendComment() {
 		ReelsPost post = current();
+		if (post == null || view != View.COMMENTS) return;
 		String text = commentInput.text().trim();
-		if (post == null || text.isEmpty()) return;
-		if (reels.comment(post.id, host.playerName(), text, now()) != null) {
-			commentInput.clear();
+		String me = host.playerName();
+		if (commentMode != CommentMode.NEW) {
+			ReelsComment target = commentTarget(post);
+			if (target == null) {
+				// Den Kommentar gibt es nicht mehr: nichts senden, der getippte Text bleibt.
+				commentMode = CommentMode.NEW;
+				commentTarget = null;
+				return;
+			}
+			if (text.isEmpty()) return;
+			String id = target.id;
+			ReelsComment done = commentMode == CommentMode.EDIT ? reels.editComment(post.id, id, me, text, now())
+					: reels.reply(post.id, id, me, text, now());
+			if (done == null) return;
+			commentMode = CommentMode.NEW;
+			commentTarget = null;
+			setCommentText("");
+			scrollToComment(current(), done.id);
 			host.click();
+			return;
 		}
+		if (text.isEmpty()) return;
+		ReelsComment sent = reels.comment(post.id, me, text, now());
+		if (sent == null) return;
+		setCommentText("");
+		scrollToComment(current(), sent.id);
+		host.click();
+	}
+
+	// --- Kommentare: Namensvorschläge beim Tippen von @ ---
+
+	/** Die Namen, die gerade zur Wahl stehen (leer: keine). */
+	List<String> suggestions() {
+		return suggestions;
+	}
+
+	int suggestIndex() {
+		return suggestIndex;
+	}
+
+	/**
+	 * Der blasse Hinweis „niemand wird benachrichtigt“: solange Namen zur Wahl stehen oder das Feld jemand anderen
+	 * erwähnt.
+	 */
+	boolean commentNote() {
+		return !suggestions.isEmpty() || Mentions.mentionsOther(commentInput.text(), host.playerName());
+	}
+
+	/** Ist der Streamer-Modus an? Dann stehen die Namen vom Server und aus der Freundesliste nicht zur Wahl. */
+	private boolean streamerActive() {
+		if (testStreamer != null) return testStreamer.booleanValue();
+		Qol q = Qol.get();
+		return q != null && q.streamer.active();
+	}
+
+	/**
+	 * Nach jeder Änderung von Text oder Schreibmarke: wird davor gerade ein Name getippt ({@link Mentions#token})? Die
+	 * Vorschläge werden nur neu gerechnet, wenn sich dieser Namensanfang ändert; die Spieler auf dem Server werden nur
+	 * einmal gelesen, wenn ein Namensanfang auftaucht.
+	 */
+	private void refreshSuggestions() {
+		String token = view == View.COMMENTS ? Mentions.token(commentInput.text(), commentInput.cursor()) : null;
+		if (token == null) {
+			suggestToken = null;
+			suggestOnline = null;
+			suggestions = Collections.<String>emptyList();
+			suggestIndex = 0;
+			return;
+		}
+		if (token.equals(suggestToken)) return;
+		boolean streamer = streamerActive();
+		if (suggestToken == null) {
+			List<String> online = null;
+			if (!streamer) {
+				try {
+					online = host.onlinePlayers();
+				} catch (RuntimeException e) {
+					online = null;
+				}
+			}
+			suggestOnline = online == null ? Collections.<String>emptyList() : new ArrayList<String>(online);
+		}
+		suggestToken = token;
+		String me = host.playerName();
+		List<Collection<String>> sources = new ArrayList<Collection<String>>();
+		// 1. Wer in diesem Post schon vorkommt.
+		List<String> here = new ArrayList<String>();
+		ReelsPost post = current();
+		if (post != null) {
+			here.add(post.author);
+			if (post.comments != null) for (ReelsComment c : post.comments) if (c != null) here.add(c.author);
+		}
+		sources.add(here);
+		// 2. und 3. Server und Freunde – nicht im Streamer-Modus.
+		if (!streamer) {
+			sources.add(suggestOnline);
+			Collection<String> known;
+			try {
+				known = host.friendNames();
+			} catch (RuntimeException e) {
+				known = null;
+			}
+			if (known != null) sources.add(new ArrayList<String>(known));
+		}
+		// 4. Alle, die im Feed gepostet haben.
+		List<String> authors = new ArrayList<String>();
+		if (feed != null) for (ReelsPost p : feed) if (p != null) authors.add(p.author);
+		sources.add(authors);
+		List<String> found = Mentions.suggest(token, sources, me, SUGGEST_MAX);
+		// Steht der Name schon ganz da, gibt es nichts vorzuschlagen.
+		if (found.size() == 1 && found.get(0).equalsIgnoreCase(token)) found = Collections.<String>emptyList();
+		suggestions = found;
+		suggestIndex = 0;
+	}
+
+	/** Den Namen {@code index} der Vorschläge einsetzen („@Name “); die Schreibmarke steht danach dahinter. */
+	void completeSuggestion(int index) {
+		if (view != View.COMMENTS || index < 0 || index >= suggestions.size()) return;
+		Mentions.Edit edit = Mentions.complete(commentInput.text(), commentInput.cursor(), suggestions.get(index), ReelsComment.MAX_TEXT);
+		commentInput.setText(edit.text);
+		commentInput.setCursor(edit.caret);
+		commentFieldStart = 0;
+		refreshSuggestions();
+		focusComment();
+		host.click();
+	}
+
+	/** Tasten im Kommentar-Blatt. Im Textfeld sind Buchstaben nie Kurztasten – jede Taste ist verbraucht. */
+	private void commentKey(UiKey key) {
+		boolean names = !suggestions.isEmpty();
+		switch (key) {
+			case ENTER:
+				sendComment();
+				return;
+			case ESCAPE:
+				// Erst den Modus verlassen, dann das Blatt schließen.
+				if (commentMode != CommentMode.NEW) cancelCommentMode();
+				else closeComments();
+				return;
+			case PASTE:
+				paste(commentInput);
+				break;
+			case TAB:
+				if (names) completeSuggestion(suggestIndex);
+				return;
+			case UP:
+				if (names) suggestIndex = Math.max(0, suggestIndex - 1);
+				else commentScroll.step(1);
+				return;
+			case DOWN:
+				if (names) suggestIndex = Math.min(suggestions.size() - 1, suggestIndex + 1);
+				else commentScroll.step(-1);
+				return;
+			default:
+				editFree(commentInput, key);
+				break;
+		}
+		refreshSuggestions();
+	}
+
+	// --- Erwähnungen und Antworten ---
+
+	/** Zahl der ungesehenen Erwähnungen und Antworten unter diesem Post (Marke am Kommentar-Symbol). */
+	int unseenPings(ReelsPost post) {
+		if (post == null) return 0;
+		if (shownFeed != badgeFeed || post.id == null || !post.id.equals(badgePost)) {
+			badgeFeed = shownFeed;
+			badgePost = post.id;
+			badgeCount = Pings.unseen(post, host.playerName());
+		}
+		return badgeCount;
+	}
+
+	/**
+	 * Im ersten Bild und nach jeder Änderung des Feeds: ist die Zahl der ungesehenen Erwähnungen und Antworten
+	 * gestiegen ({@link Reels#announcePings}), kommt eine Meldung. Eine einzelne nennt den Verfasser, mehrere die Zahl.
+	 * Der Klick darauf führt zum Post – außer der Filter zeigt ihn gerade nicht.
+	 */
+	private void checkPings() {
+		if (pingsKnown && feed == pingFeed) return;
+		pingsKnown = true;
+		pingFeed = feed;
+		String me = host.playerName();
+		unseenPings = Pings.unseen(feed, me);
+		if (!reels.announcePings(unseenPings)) return;
+		Pings.Hit hit = Pings.first(feed, me);
+		if (hit == null) return;
+		String text;
+		if (unseenPings == 1) {
+			String author = hit.comment.author == null || hit.comment.author.isEmpty() ? "?" : hit.comment.author;
+			text = I18n.tr(hit.mention ? "reels.toast.ping" : "reels.toast.reply", author);
+		} else {
+			text = I18n.tr("reels.toast.pings", unseenPings);
+		}
+		Runnable open = FeedQuery.indexOf(shown, hit.postId) < 0 ? null : new Runnable() {
+			@Override
+			public void run() {
+				openPing();
+			}
+		};
+		announce(text, open);
+	}
+
+	/** Klick auf die Meldung: zum Post mit der ältesten ungesehenen Erwähnung bzw. Antwort und seine Kommentare öffnen. */
+	private void openPing() {
+		if (disposed || isClosing() || (view != View.FEED && view != View.COMMENTS)) return;
+		refreshFeed();
+		Pings.Hit hit = Pings.first(feed, host.playerName());
+		int i = hit == null ? -1 : FeedQuery.indexOf(shown, hit.postId);
+		if (i < 0) return;
+		// Die Meldung hat ihren Dienst getan.
+		toast = null;
+		toastAction = null;
+		closeSheet();
+		closeComments();
+		pager.to(i);
+		openComments();
 	}
 
 	/** „Feed“ in der Leiste: zurück zum Feed (schließt die Kommentare bzw. die Kamera). */
@@ -1110,8 +1539,8 @@ public final class PhoneUi extends UiScreen {
 			String s = lines.get(i);
 			PhoneText.draw(c, s, x + (w - PhoneText.width(c, s, m)) / 2, y + pad + i * lineH, m, FeedView.WHITE, false);
 		}
-		// Nur eine Meldung, die irgendwohin führt, nimmt Klicks an.
-		if (toastAction != null) tap("toast", x, y, w, h, toastAction);
+		// Nur eine Meldung, die irgendwohin führt, nimmt Klicks an – und nur dort, wo sie hinführen kann (nicht in der Kamera).
+		if (toastAction != null && (view == View.FEED || view == View.COMMENTS)) tap("toast", x, y, w, h, toastAction);
 		else spot("toast", x, y, w, h);
 	}
 
@@ -1428,7 +1857,10 @@ public final class PhoneUi extends UiScreen {
 
 	@Override
 	public boolean mouseScrolled(double mouseX, double mouseY, double amount) {
-		if (view == View.FEED && sheet == Sheet.NONE && !isClosing()) pager.wheel(amount);
+		if (isClosing()) return true;
+		// Im Kommentar-Blatt blättert das Rad in den Kommentaren (nach oben = ältere), nie im Feed.
+		if (view == View.COMMENTS) commentScroll.wheel(-amount);
+		else if (view == View.FEED && sheet == Sheet.NONE) pager.wheel(amount);
 		return true;
 	}
 
@@ -1436,16 +1868,7 @@ public final class PhoneUi extends UiScreen {
 	public boolean keyPressed(int rawKey, UiKey key, boolean shift) {
 		if (isClosing()) return true;
 		if (view == View.COMMENTS) {
-			// Im Textfeld sind Buchstaben nie Kurztasten.
-			if (key == UiKey.ENTER) {
-				sendComment();
-			} else if (key == UiKey.ESCAPE) {
-				closeComments();
-			} else if (key == UiKey.PASTE) {
-				paste(commentInput);
-			} else {
-				edit(commentInput, key);
-			}
+			commentKey(key);
 			return true;
 		}
 		if (view == View.COMPOSE) {
@@ -1539,8 +1962,9 @@ public final class PhoneUi extends UiScreen {
 	}
 
 	/**
-	 * Taste im Textfeld. Der Cursor bleibt immer am Ende: die Felder des Handys zeigen ihn dort und haben keinen Platz
-	 * zum Blättern im Text – Pfeile, Pos1 und Ende würden ihn sonst unsichtbar verschieben.
+	 * Taste im Feld von „Neuer Post“. Der Cursor bleibt immer am Ende: das Feld zeigt ihn dort und blättert nicht im
+	 * Text – Pfeile, Pos1 und Ende würden ihn sonst unsichtbar verschieben. (Das Kommentarfeld hat eine bewegliche
+	 * Schreibmarke: {@link #editFree}.)
 	 */
 	private static void edit(TextInput input, UiKey key) {
 		if (key == UiKey.LEFT || key == UiKey.RIGHT || key == UiKey.HOME || key == UiKey.END) return;
@@ -1555,7 +1979,30 @@ public final class PhoneUi extends UiScreen {
 		input.key(key);
 	}
 
-	/** Einfügen aus der Zwischenablage. Ein Zeichenpaar (Emoji) kommt ganz oder gar nicht – auch an der Längengrenze. */
+	/**
+	 * Taste im Kommentarfeld mit beweglicher Schreibmarke: Pfeile, Pos1 und Ende bewegen sie, Rücktaste und Entf löschen
+	 * an ihr. Ein Zeichenpaar (Emoji) zählt dabei als ein Zeichen – die Schreibmarke steht nie mitten darin, und es geht
+	 * als Ganzes weg. Andere Tasten tun nichts.
+	 */
+	private static void editFree(TextInput input, UiKey key) {
+		if (key != UiKey.LEFT && key != UiKey.RIGHT && key != UiKey.HOME && key != UiKey.END && key != UiKey.BACKSPACE
+				&& key != UiKey.DELETE) {
+			return;
+		}
+		String text = input.text();
+		int at = input.cursor();
+		boolean pairBefore = at >= 2 && Character.isLowSurrogate(text.charAt(at - 1)) && Character.isHighSurrogate(text.charAt(at - 2));
+		boolean pairAfter = at + 1 < text.length() && Character.isHighSurrogate(text.charAt(at))
+				&& Character.isLowSurrogate(text.charAt(at + 1));
+		if ((key == UiKey.LEFT || key == UiKey.BACKSPACE) && pairBefore) input.key(key);
+		if ((key == UiKey.RIGHT || key == UiKey.DELETE) && pairAfter) input.key(key);
+		input.key(key);
+	}
+
+	/**
+	 * Einfügen aus der Zwischenablage, an der Schreibmarke. Ein Zeichenpaar (Emoji) kommt ganz oder gar nicht – auch an
+	 * der Längengrenze.
+	 */
 	private void paste(TextInput input) {
 		String text = host.paste();
 		if (text == null) return;
@@ -1584,7 +2031,10 @@ public final class PhoneUi extends UiScreen {
 			return true;
 		}
 		if (view != View.COMMENTS) return false;
+		// Die erste Hälfte eines Zeichenpaars (Emoji) nur, wenn auch die zweite noch ins Feld passt.
+		if (Character.isHighSurrogate(ch) && commentInput.text().length() + 2 > ReelsComment.MAX_TEXT) return true;
 		commentInput.type(ch);
+		refreshSuggestions();
 		return true;
 	}
 
@@ -1616,6 +2066,7 @@ public final class PhoneUi extends UiScreen {
 		results.clear();
 		toastQueue.clear();
 		toastAction = null;
+		closeComments();
 		commentInput.setFocused(false);
 		captionInput.setFocused(false);
 		// Ein aufgenommenes, aber nicht gepostetes Foto bleibt nicht auf der Platte liegen.
@@ -1664,7 +2115,10 @@ public final class PhoneUi extends UiScreen {
 	 * Wo eine Stelle des Handys im letzten Bild lag: {x, y, Breite, Höhe} in Fensterpixeln, oder null. Namen:
 	 * {@code phone}, {@code screen}, {@code photo}, {@code heart}, {@code comment}, {@code save}, {@code camera},
 	 * {@code rotate}, {@code home}, {@code streak}, {@code filterChip}, {@code metaShader}, {@code metaPack},
-	 * {@code metaVersion}, {@code commentInput}, {@code commentsClose}, {@code commentsBack}; Kamera: {@code viewfinder},
+	 * {@code metaVersion}, {@code pingBadge}; Kommentare: {@code commentSheet}, {@code commentsBack}, {@code commentsClose},
+	 * {@code commentInput}, {@code commentCaret}, {@code commentRow<i>}, {@code commentReply<i>}, {@code commentEdit<i>}
+	 * (i = Stelle in der Liste, 0 = der älteste), {@code commentTarget}, {@code commentBanner}, {@code commentCancel},
+	 * {@code commentNote}, {@code suggest0} bis {@code suggest4}; Kamera: {@code viewfinder},
 	 * {@code camBack}, {@code camNote}, {@code camPhoto}, {@code camSelfie}, {@code camShutter}, {@code camFlip},
 	 * {@code camThumb}; Neuer Post: {@code composePhoto}, {@code composeField}, {@code composeRetry},
 	 * {@code composePost}; Blätter: {@code saveSheet}, {@code saveBack}, {@code saveClose}, {@code saveDo},
@@ -1745,6 +2199,36 @@ public final class PhoneUi extends UiScreen {
 
 	public FeedSort testSort() {
 		return sort;
+	}
+
+	/** Was Enter im Kommentar-Blatt gerade tut: {@code NEW}, {@code REPLY} oder {@code EDIT}. */
+	public String testCommentMode() {
+		return commentMode.name();
+	}
+
+	/** Text im Kommentarfeld. */
+	public String testCommentText() {
+		return commentInput.text();
+	}
+
+	/** Stelle der Schreibmarke im Kommentarfeld (0 = vor dem ersten Zeichen). */
+	public int testCommentCaret() {
+		return commentInput.cursor();
+	}
+
+	/** Die Namen, die beim Tippen von {@code @} gerade zur Wahl stehen. */
+	public List<String> testSuggestions() {
+		return new ArrayList<String>(suggestions);
+	}
+
+	/** So viele Zeilen der Kommentar-Liste sind unten übersprungen (0 = ganz unten). */
+	public int testCommentScroll() {
+		return commentScroll.index();
+	}
+
+	/** Ungesehene Erwähnungen und Antworten im ganzen Feed, frisch gerechnet. */
+	public int testUnseenPings() {
+		return Pings.unseen(reels.backend().feed(), host.playerName());
 	}
 
 	/** Stand des Streak-Schutzes, frisch gerechnet. */

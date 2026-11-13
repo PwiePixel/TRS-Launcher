@@ -4,7 +4,6 @@ import dev.theredstonee.trsclient.core.i18n.I18n;
 import dev.theredstonee.trsclient.core.reels.FeedFilter;
 import dev.theredstonee.trsclient.core.reels.PhoneHold;
 import dev.theredstonee.trsclient.core.reels.PhoneLayout;
-import dev.theredstonee.trsclient.core.reels.ReelsComment;
 import dev.theredstonee.trsclient.core.reels.ReelsMeta;
 import dev.theredstonee.trsclient.core.reels.ReelsPost;
 import dev.theredstonee.trsclient.core.reels.ReelsTime;
@@ -20,8 +19,9 @@ import java.util.Locale;
  * Der Feed auf dem Bildschirm des Handys (MC-Reels): ein Foto je Seite, darüber Uhr, Streak, Titel, Seitenzahl und die
  * Marke für Filter und Reihenfolge, rechts Herz, Kommentare und „Bild speichern“, unten Name, Text und (hochkant) die
  * Leiste Feed · Kamera · Drehen. Quer stehen Kamera und Drehen mit in der rechten Spalte. Unter dem Text stehen kleine
- * Marken, womit das Foto aufgenommen wurde (Shaderpack, Instanz, Version). Dazu das Kommentar-Blatt über dem unteren
- * Teil; die übrigen Blätter zeichnet {@link SheetView}.
+ * Marken, womit das Foto aufgenommen wurde (Shaderpack, Instanz, Version). Am Kommentar-Symbol sitzt eine gelbe Marke
+ * mit der Zahl der ungesehenen Erwähnungen und Antworten. Das Kommentar-Blatt über dem unteren Teil zeichnet
+ * {@link CommentsView}, die übrigen Blätter {@link SheetView}.
  *
  * <p>Alle Maße sind Handy-Pixel aus dem freigegebenen Entwurf ({@code reels()} / {@code reelsLand()}), umgerechnet über
  * {@link PhoneLayout#q}. Gezeichnet wird nur innerhalb des Bildschirm-Rechtecks – ohne Scissor: Fotos werden über
@@ -53,10 +53,10 @@ final class FeedView {
 	/** Abdunkelung des Fotos, das hinter einem eingepassten Foto die Fläche füllt. */
 	static final int DIMMED = 0xFF3A3A3A;
 	static final int SHEET_DIM = 0x73000000;
+	/** Dunkle Schrift auf der gelben Marke am Kommentar-Symbol. */
+	static final int PING_TEXT = 0xFF111116;
 	/** Bänder je Verlauf (oben/unten über dem Foto). */
 	static final int GRADIENT_BANDS = 32;
-	/** So viele Kommentare zeigt das Blatt höchstens (die neuesten). */
-	static final int MAX_COMMENTS_SHOWN = 4;
 	/** Marken am Post: Shader- und Instanz-Name zeigen höchstens so viele Zeichen (dann „…“). */
 	static final int META_NAME_CHARS = 28;
 	/** Eine gekürzte Marke braucht Platz für ihr Symbol und mindestens so viele Zeichen – sonst fällt sie weg. */
@@ -85,6 +85,7 @@ final class FeedView {
 
 	private final PhoneUi ui;
 	private final SheetView sheets;
+	private final CommentsView comments;
 	private Canvas c;
 	private PhoneLayout l;
 	private boolean land;
@@ -95,9 +96,10 @@ final class FeedView {
 	/** Unterkante von Seitenzahl und Filter-Marke (Fensterpixel) – darüber wächst der Textblock nicht hinaus. */
 	private int headBottom;
 
-	FeedView(PhoneUi ui, SheetView sheets) {
+	FeedView(PhoneUi ui, SheetView sheets, CommentsView comments) {
 		this.ui = ui;
 		this.sheets = sheets;
+		this.comments = comments;
 	}
 
 	/** Handy-Pixel → Fensterpixel (darf 0 werden; für Abstände). */
@@ -139,7 +141,7 @@ final class FeedView {
 		}
 		rail(post);
 		if (!land) nav(navH);
-		if (post != null && ui.view() == PhoneUi.View.COMMENTS) comments(post);
+		if (post != null && ui.view() == PhoneUi.View.COMMENTS) comments.draw(c, l, post);
 		sheets.draw(c, l);
 	}
 
@@ -452,6 +454,7 @@ final class FeedView {
 					ui.openComments();
 				}
 			});
+			pingBadge(ui.unseenPings(post), cx - iconW / 2 + iconW, y);
 			y += itemH + gapItem;
 
 			if (railSave) {
@@ -480,6 +483,31 @@ final class FeedView {
 				}
 			});
 		}
+	}
+
+	/**
+	 * Gelbe Marke mit der Zahl der ungesehenen Erwähnungen und Antworten, oben rechts am Kommentar-Symbol: ihre rechte
+	 * Kante steht etwas über das Symbol hinaus, bleibt aber auf dem Bildschirm.
+	 *
+	 * @param iconRight rechte Kante des Symbols
+	 * @param iconTop   obere Kante des Symbols
+	 */
+	private void pingBadge(int count, int iconRight, int iconTop) {
+		if (count <= 0) return;
+		String text = count > 99 ? "99+" : String.valueOf(count);
+		int m = PhoneText.scale(19, l.q);
+		int padX = Math.max(1, p(3));
+		int padY = Math.max(1, p(2));
+		int h = PhoneText.height(m) + 2 * padY;
+		// Die Schrift lässt hinter jedem Zeichen eine Spalte frei – die zählt nicht zur Breite der Ziffern.
+		int tw = PhoneText.width(c, text, m) - m;
+		int w = Math.max(h, tw + 2 * padX);
+		int x = Math.min(sx + sw - w, iconRight + p(4) - w);
+		int y = Math.max(sy, iconTop - p(4));
+		if (x < sx || y + h > sy + sh) return;
+		c.fill(x, y, x + w, y + h, AMBER);
+		PhoneText.draw(c, text, x + (w - tw) / 2, y + padY, m, PING_TEXT, false);
+		ui.spot("pingBadge", x, y, w, h);
 	}
 
 	/** Der rote Kamera-Knopf (heller Rand oben, dunkler unten, Kamera-Symbol). */
@@ -828,124 +856,5 @@ final class FeedView {
 		int cx = x + w / 2;
 		PhoneIcons.draw(c, icon, cx - iw / 2, y, isz, argb, false);
 		if (text) PhoneText.draw(c, label, cx - PhoneText.width(c, label, k) / 2, y + ih + gap, k, argb, false);
-	}
-
-	// --- Kommentare ---
-
-	private void comments(final ReelsPost post) {
-		int sheetH = Math.max(1, Math.min(sh - p(40), p(land ? 290 : 400)));
-		int y0 = sy + sh - sheetH;
-		int line = Math.min(sheetH / 8, l.px(3));
-		int pad = p(14);
-		int left = sx + pad;
-		int width = sw - 2 * pad;
-
-		c.fill(sx, sy, sx + sw, y0, SHEET_DIM);
-		ui.tap("commentsBack", sx, sy, sw, y0 - sy, new Runnable() {
-			@Override
-			public void run() {
-				ui.closeComments();
-			}
-		});
-		c.fill(sx, y0, sx + sw, sy + sh, BAR);
-		if (line > 0) c.fill(sx, y0, sx + sw, y0 + line, BAR_LINE);
-		// Klicks auf das Blatt selbst gehen nicht an das, was darunter liegt.
-		ui.tap("commentSheet", sx, y0, sw, sheetH, null);
-		if (width <= 0) return;
-
-		// Kopf: „Kommentare · 3“ und das Kreuz zum Schließen.
-		int mTitle = PhoneText.scale(24, l.q);
-		int xs = l.px(3);
-		int xw = PhoneIcons.width(PhoneIcons.X, xs), xh = PhoneIcons.height(PhoneIcons.X, xs);
-		int headH = Math.max(PhoneText.height(mTitle), xh);
-		int headY = y0 + line + pad;
-		int n = post.comments == null ? 0 : post.comments.size();
-		String title = n > 0 ? I18n.tr("reels.comments") + " · " + n : I18n.tr("reels.comments");
-		PhoneText.line(c, title, left, PhoneText.centerY(headY, headH, mTitle), mTitle, width - xw - pad, WHITE, false);
-		int closeX = sx + sw - pad - xw;
-		PhoneIcons.draw(c, PhoneIcons.X, closeX, headY + (headH - xh) / 2, xs, BAR_OFF, false);
-		int hit = Math.max(1, p(10));
-		ui.tap("commentsClose", closeX - hit, headY - hit, xw + 2 * hit, headH + 2 * hit, new Runnable() {
-			@Override
-			public void run() {
-				ui.closeComments();
-			}
-		});
-
-		// Eingabefeld ganz unten.
-		int mIn = PhoneText.scale(25, l.q);
-		int inPadX = p(12), inPadY = Math.max(1, p(8));
-		int fieldH = PhoneText.height(mIn) + 2 * inPadY;
-		int fieldY = sy + sh - pad - fieldH;
-		int border = Math.max(1, Math.min(inPadY, l.px(3)));
-		c.fill(left, fieldY, left + width, fieldY + fieldH, FIELD);
-		c.fill(left, fieldY, left + width, fieldY + border, FIELD_LINE);
-		c.fill(left, fieldY + fieldH - border, left + width, fieldY + fieldH, FIELD_LINE);
-		c.fill(left, fieldY + border, left + border, fieldY + fieldH - border, FIELD_LINE);
-		c.fill(left + width - border, fieldY + border, left + width, fieldY + fieldH - border, FIELD_LINE);
-		int caretW = Math.max(1, 2 * mIn);
-		int textX = left + inPadX;
-		int textY = PhoneText.centerY(fieldY, fieldH, mIn);
-		int textMax = width - 2 * inPadX - caretW - mIn;
-		String typed = ui.commentInput.text();
-		int caretX = textX;
-		if (typed.isEmpty()) {
-			String hint = PhoneText.clip(c, I18n.tr("reels.comment.hint"), mIn, textMax);
-			PhoneText.draw(c, hint, textX + caretW + mIn, textY, mIn, TEXT_DIM, false);
-		} else {
-			String shown = PhoneText.tail(c, typed, mIn, textMax);
-			PhoneText.draw(c, shown, textX, textY, mIn, WHITE, false);
-			caretX = textX + PhoneText.width(c, shown, mIn) + mIn;
-		}
-		if (ui.commentInput.focused() && ui.caretOn()) {
-			c.fill(caretX, fieldY + inPadY, caretX + caretW, fieldY + fieldH - inPadY, RED);
-		}
-		ui.tap("commentInput", left, fieldY, width, fieldH, new Runnable() {
-			@Override
-			public void run() {
-				ui.commentInput.setFocused(true);
-			}
-		});
-
-		// Dazwischen die neuesten Kommentare, der neueste direkt über dem Feld.
-		int listTop = headY + headH + p(10);
-		int listBottom = fieldY - p(10);
-		int mC = PhoneText.scale(21, l.q);
-		int lineH = (PhoneText.GLYPH_H + 2) * mC;
-		int gap = p(6);
-		if (n == 0) {
-			int ty = listTop + Math.max(0, (listBottom - listTop - PhoneText.height(mC)) / 2);
-			if (listBottom - listTop >= PhoneText.height(mC)) {
-				PhoneText.centered(c, I18n.tr("reels.comment.none"), sx + sw / 2, ty, mC, width, TEXT_DIM, false);
-			}
-			return;
-		}
-		int y = listBottom;
-		int shown = 0;
-		for (int i = n - 1; i >= 0 && shown < MAX_COMMENTS_SHOWN; i--) {
-			ReelsComment comment = post.comments.get(i);
-			if (comment == null || comment.text == null) continue;
-			String author = comment.author == null ? "" : comment.author;
-			String prefix = author.isEmpty() ? "" : author + ": ";
-			List<String> lines = PhoneText.wrap(c, prefix + comment.text, mC, width, 2);
-			if (lines.isEmpty()) continue;
-			int blockH = (lines.size() - 1) * lineH + PhoneText.height(mC);
-			if (y - blockH < listTop) break;
-			y -= blockH;
-			for (int j = 0; j < lines.size(); j++) {
-				String text = lines.get(j);
-				int ly = y + j * lineH;
-				if (j == 0 && !prefix.isEmpty() && text.startsWith(prefix)) {
-					// Name in Gelb, der Rest weiß – direkt dahinter (die Schrift hat feste Zeichenbreiten je Zeichen).
-					PhoneText.draw(c, prefix, left, ly, mC, AMBER_LIGHT, false);
-					PhoneText.draw(c, text.substring(prefix.length()), left + PhoneText.width(c, prefix, mC), ly, mC, WHITE, false);
-				} else {
-					PhoneText.draw(c, text, left, ly, mC, WHITE, false);
-				}
-			}
-			y -= gap;
-			shown++;
-		}
-		ui.commentsShown = shown;
 	}
 }

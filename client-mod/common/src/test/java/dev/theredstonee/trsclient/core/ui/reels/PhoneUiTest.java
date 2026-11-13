@@ -1374,6 +1374,9 @@ class PhoneUiTest {
 		assertTrue(c.shows("Erster"));
 		assertTrue(c.shows(I18n.tr("reels.comment.hint")), "leeres Feld zeigt den Hinweis");
 		assertNotNull(ui.testSpot("commentInput"));
+		assertEquals(1, ui.commentsShown);
+		assertNotNull(ui.testSpot("commentRow0"));
+		assertEquals("NEW", ui.testCommentMode());
 
 		// Buchstaben sind im Textfeld nie Kurztasten: R dreht nicht, K steckt nicht weg.
 		assertTrue(ui.inputKey('R', UiKey.NONE, false));
@@ -1401,6 +1404,10 @@ class PhoneUiTest {
 		c = frame(ui);
 		assertTrue(c.shows("Hrr süs! ja"));
 		assertEquals(2, ui.commentsShown);
+		assertEquals("", ui.testCommentText(), "das Feld ist wieder leer");
+		// Der neue steht unten, direkt über dem Feld; der ältere darüber.
+		assertTrue(spot(ui, "commentRow1")[1] > spot(ui, "commentRow0")[1]);
+		assertTrue(spot(ui, "commentRow1")[1] + spot(ui, "commentRow1")[3] <= spot(ui, "commentInput")[1]);
 		// Leerer Text wird nicht gesendet.
 		ui.inputKey(0, UiKey.ENTER, false);
 		assertEquals(2, backend.feed().get(0).comments.size());
@@ -1422,9 +1429,15 @@ class PhoneUiTest {
 			click(ui, "comment");
 			assertEquals(PhoneUi.View.COMMENTS, ui.testView(), hold.toString());
 			RecCanvas c = frame(ui);
-			assertTrue(ui.commentsShown >= 1 && ui.commentsShown <= FeedView.MAX_COMMENTS_SHOWN, "gezeigt: " + ui.commentsShown);
+			// Einzeiler samt Link-Zeile: quer passen fünf, hochkant sechs – eine Zeile, die nicht ganz passt, fällt weg.
+			assertEquals(hold == PhoneHold.LANDSCAPE ? 5 : 6, ui.commentsShown, hold.toString());
 			assertTrue(c.shows("Kommentar 6"), "der neueste steht da: " + c.strings());
-			assertFalse(c.shows("Kommentar 0"), "nur die neuesten");
+			assertFalse(c.shows("Kommentar 0"), "nur die neuesten – die älteren kommen beim Blättern");
+			int[] sheetNow = spot(ui, "commentSheet");
+			for (int i = 7 - ui.commentsShown; i < 7; i++) {
+				assertTrue(inside(spot(ui, "commentRow" + i), sheetNow), hold + " Zeile " + i + " liegt im Blatt");
+			}
+			assertNull(ui.testSpot("commentRow" + (6 - ui.commentsShown)), "was nicht gezeichnet ist, hat keine Stelle");
 			// Ein Klick auf das Blatt selbst trifft nicht das Herz darunter.
 			int[] sheet = ui.testSpot("commentSheet");
 			assertNotNull(sheet);
@@ -2432,7 +2445,7 @@ class PhoneUiTest {
 		ui.keyPressed(0, UiKey.DELETE, false);
 		assertEquals("Hallo", ui.testCaption());
 		ui.dispose();
-		// Dasselbe im Kommentarfeld.
+		// Das Kommentarfeld dagegen hat eine bewegliche Schreibmarke – und zeigt sie dort, wo sie steht.
 		post("Hallo", host.name, 1, false);
 		PhoneUi feed = ui(PhoneHold.LANDSCAPE);
 		frame(feed);
@@ -2442,7 +2455,8 @@ class PhoneUiTest {
 		feed.keyPressed(0, UiKey.LEFT, false);
 		feed.keyPressed(0, UiKey.HOME, false);
 		feed.inputChar('d');
-		assertEquals("abcd", feed.commentInput.text());
+		assertEquals("dabc", feed.commentInput.text());
+		assertEquals(1, feed.testCommentCaret());
 		feed.dispose();
 	}
 

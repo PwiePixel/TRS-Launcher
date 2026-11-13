@@ -165,4 +165,57 @@ final class PhoneText {
 		}
 		return s.substring(start);
 	}
+
+	/**
+	 * Welcher Teil des Textes in einem Eingabefeld mit beweglicher Schreibmarke zu sehen ist: {@code {start, end}}.
+	 * Passt der ganze Text, ist es der ganze Text. Sonst bleibt der Anfang, wo er im letzten Bild war
+	 * ({@code prevStart}), solange die Schreibmarke im Feld bleibt: läuft sie links hinaus, beginnt das Feld bei ihr;
+	 * läuft sie rechts hinaus, rückt der Anfang so weit nach rechts, bis der Text bis zur Schreibmarke passt. Reicht der
+	 * gezeigte Teil bis zum Textende und ist noch Platz (am Ende wurde gelöscht), rückt der Anfang wieder nach links –
+	 * beim Tippen und Löschen am Ende zeigt das Feld also den Schluss, wie {@link #tail}. Ein Zeichenpaar (Emoji) wird
+	 * nie geteilt.
+	 *
+	 * @param caret     Stelle der Schreibmarke im Text (0 … Länge)
+	 * @param prevStart {@code start} des letzten Bildes (0 nach dem Leeren oder Setzen des Feldes)
+	 */
+	static int[] window(Canvas c, String s, int caret, int prevStart, int m, int maxWidth) {
+		if (s == null || s.isEmpty()) return new int[]{0, 0};
+		int n = s.length();
+		int room = maxWidth <= 0 ? 0 : maxWidth / Math.max(1, m);
+		if (c.textWidth(s) <= room) return new int[]{0, n};
+		int at = whole(s, Math.max(0, Math.min(n, caret)));
+		int start = whole(s, Math.max(0, Math.min(prevStart, at)));
+		while (start < at && c.textWidth(s.substring(start, at)) > room) start = after(s, start);
+		int end = at;
+		while (end < n) {
+			int next = after(s, end);
+			if (c.textWidth(s.substring(start, next)) > room) break;
+			end = next;
+		}
+		if (end == n) {
+			while (start > 0) {
+				int before = before(s, start);
+				if (c.textWidth(s.substring(before, n)) > room) break;
+				start = before;
+			}
+		}
+		return new int[]{start, end};
+	}
+
+	/** Die Stelle selbst – oder die davor, wenn sie mitten in einem Zeichenpaar läge. */
+	static int whole(String s, int i) {
+		return i > 0 && i < s.length() && Character.isLowSurrogate(s.charAt(i)) && Character.isHighSurrogate(s.charAt(i - 1)) ? i - 1 : i;
+	}
+
+	/** Die Stelle hinter dem Zeichen bei {@code i} (ein Zeichenpaar zählt als eines). */
+	static int after(String s, int i) {
+		if (i >= s.length()) return s.length();
+		return Character.isHighSurrogate(s.charAt(i)) && i + 1 < s.length() && Character.isLowSurrogate(s.charAt(i + 1)) ? i + 2 : i + 1;
+	}
+
+	/** Die Stelle vor dem Zeichen, das bei {@code i} endet (ein Zeichenpaar zählt als eines). */
+	static int before(String s, int i) {
+		if (i <= 0) return 0;
+		return i >= 2 && Character.isLowSurrogate(s.charAt(i - 1)) && Character.isHighSurrogate(s.charAt(i - 2)) ? i - 2 : i - 1;
+	}
 }
