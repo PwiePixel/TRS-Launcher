@@ -287,6 +287,12 @@ class PhoneRenderTool {
 				return new PhoneUi.Frame(img.getRGB(0, 0, w, h, null, 0, w), w, h, photo.booleanValue());
 			}
 			@Override public void close() { }
+			// Das Werkzeug fasst weder die Zwischenablage noch den Dateimanager des Systems an.
+			@Override public boolean openFolder(Path dir) { return false; }
+			@Override public dev.theredstonee.trsclient.core.screenshot.ImageClipboard.Result copyImage(Path png) {
+				return dev.theredstonee.trsclient.core.screenshot.ImageClipboard.Result.UNSUPPORTED;
+			}
+			@Override public java.util.Collection<String> friendNames() { return null; }
 		};
 	}
 
