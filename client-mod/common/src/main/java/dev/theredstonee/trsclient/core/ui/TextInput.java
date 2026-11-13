@@ -37,6 +37,11 @@ public final class TextInput implements dev.theredstonee.trsclient.core.touch.To
 		return cursor;
 	}
 
+	/** Schreibmarke an diese Stelle setzen (begrenzt auf 0 … Länge des Texts). */
+	public void setCursor(int position) {
+		cursor = Math.max(0, Math.min(text.length(), position));
+	}
+
 	@Override
 	public boolean focused() {
 		return focused;

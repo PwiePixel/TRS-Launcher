@@ -129,6 +129,28 @@ class UiLogicTest {
 	}
 
 	@Test
+	void setCursorIsClampedToTheText() {
+		TextInput input = new TextInput(10);
+		input.setText("abcd");
+		assertEquals(4, input.cursor(), "nach dem Setzen steht die Schreibmarke am Ende");
+		input.setCursor(1);
+		assertEquals(1, input.cursor());
+		assertTrue(input.type('X'));
+		assertEquals("aXbcd", input.text(), "eingefügt wird an der Schreibmarke");
+		assertEquals(2, input.cursor());
+		input.setCursor(-7);
+		assertEquals(0, input.cursor());
+		input.setCursor(99);
+		assertEquals(5, input.cursor());
+		input.setCursor(0);
+		assertTrue(input.key(UiKey.DELETE));
+		assertEquals("Xbcd", input.text());
+		input.clear();
+		input.setCursor(3);
+		assertEquals(0, input.cursor(), "leeres Feld: nur die Stelle 0");
+	}
+
+	@Test
 	void colorSettingKeepsAlphaAndChroma() {
 		ColorSetting c = new ColorSetting("color", "Farbe", 0x80FFB84D, true);
 		assertEquals(0x80, c.alpha());

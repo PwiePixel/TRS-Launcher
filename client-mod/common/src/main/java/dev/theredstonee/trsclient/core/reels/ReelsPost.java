@@ -32,6 +32,8 @@ public final class ReelsPost {
 	public int likes;
 	/** Zeitpunkt des Postens (Millisekunden seit 1970). */
 	public long createdAt;
+	/** Womit das Foto aufgenommen wurde – null bei alten Posts und wenn nichts bekannt war. */
+	public ReelsMeta meta;
 	public List<ReelsComment> comments = new ArrayList<ReelsComment>();
 
 	public ReelsPost() {
@@ -50,6 +52,7 @@ public final class ReelsPost {
 		p.likedByMe = likedByMe;
 		p.likes = likes;
 		p.createdAt = createdAt;
+		p.meta = meta == null ? null : meta.copy();
 		p.comments = new ArrayList<ReelsComment>();
 		if (comments != null) {
 			for (ReelsComment c : comments) if (c != null) p.comments.add(c.copy());
