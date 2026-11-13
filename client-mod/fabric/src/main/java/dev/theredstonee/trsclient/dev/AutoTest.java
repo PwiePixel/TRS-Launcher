@@ -204,6 +204,13 @@ public final class AutoTest {
 			BugReportTest.install();
 			return;
 		}
+		// -PtrsAutotestOnly=reels: MC-Reels (Handy quer/hochkant, Arme, Feed, Kommentar, Drehen) – vorerst nur 26.2
+		//? if >=26.2 && <26.3 {
+		/*if ("reels".equals(System.getProperty("trsclient.autotest.only"))) {
+			ReelsTest.install();
+			return;
+		}
+		*///?}
 		AutoTest test = new AutoTest();
 		ClientTickEvents.END_CLIENT_TICK.register(test::tick);
 	}
