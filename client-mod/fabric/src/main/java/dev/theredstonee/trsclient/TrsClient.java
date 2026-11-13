@@ -384,6 +384,14 @@ public final class TrsClient implements ClientModInitializer {
 			*///?}
 		} else {
 			moduleKeys.releaseAll();
+			// MC-Reels: weil die Tastenzustände eben vergessen wurden, sähe eine Handy-Taste, die beim Schließen dieses
+			// Bildschirms noch unten ist (das „k“ am Ende einer Chat-Nachricht, beim Enter noch gehalten), im ersten Tick
+			// danach wie ein neuer Druck aus – das Handy ginge von selbst auf. Deshalb gilt die Sperre nach jedem
+			// Bildschirm, nicht nur nach dem Handy: geöffnet wird erst, wenn die Taste einmal losgelassen war.
+			//? if >=26.2 && <26.3 {
+			/*dev.theredstonee.trsclient.core.reels.Reels reelsBehind = dev.theredstonee.trsclient.core.reels.Reels.get();
+			if (reelsBehind != null) reelsBehind.keyGate().block();
+			*///?}
 		}
 		waypoints.tick(mc);
 		dev.theredstonee.trsclient.feature.AutoRefillHooks.tick();
