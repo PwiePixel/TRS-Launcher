@@ -1,0 +1,373 @@
+package dev.theredstonee.trsclient.core.ui.reels;
+
+import dev.theredstonee.trsclient.core.i18n.I18n;
+import dev.theredstonee.trsclient.core.module.TrsModules;
+import dev.theredstonee.trsclient.core.reels.LocalReelsBackend;
+import dev.theredstonee.trsclient.core.reels.PhoneHold;
+import dev.theredstonee.trsclient.core.reels.Reels;
+import dev.theredstonee.trsclient.core.reels.ReelsPost;
+import dev.theredstonee.trsclient.core.ui.Canvas;
+import dev.theredstonee.trsclient.core.ui.TextureRef;
+import dev.theredstonee.trsclient.core.ui.Textures;
+import dev.theredstonee.trsclient.core.ui.UiKey;
+import org.junit.jupiter.api.Assumptions;
+import org.junit.jupiter.api.Test;
+
+import javax.imageio.ImageIO;
+import java.awt.Color;
+import java.awt.Font;
+import java.awt.Graphics2D;
+import java.awt.RenderingHints;
+import java.awt.geom.AffineTransform;
+import java.awt.image.BufferedImage;
+import java.io.File;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.ArrayDeque;
+import java.util.Deque;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.TimeZone;
+import java.util.UUID;
+import java.util.concurrent.Executor;
+
+/**
+ * Entwickler-Werkzeug (kein normaler Test): zeichnet das MC-Reels-Handy ohne Spiel in PNG-Dateien – zum Vergleichen mit
+ * den freigegebenen Bildern (Arme, Gehäuse, Feed, Kommentare, verschiedene Fenstergrößen und GUI-Skalierungen). Die
+ * Zeichenfläche ist eine einfache Software-Umsetzung von {@link Canvas}; die Schrift ist nur ähnlich breit wie die des
+ * Spiels (6 px je Zeichen), nicht dieselbe.
+ *
+ * <p>Läuft nur mit {@code -Dtrsclient.test.phoneOut=<Ordner>}. Optional: {@code -Dtrsclient.test.phoneSkin=<skin.png>}
+ * (64×64; sonst ein einfacher Test-Skin), {@code -Dtrsclient.test.phoneSlim=true},
+ * {@code -Dtrsclient.test.phonePhotos=<a.png,b.png,…>} (werden zu Posts, das letzte ist das neueste),
+ * {@code -Dtrsclient.test.phoneBg=<bild>} (Spielbild hinter dem Schleier), {@code -Dtrsclient.test.phoneLang=de}.
+ */
+class PhoneRenderTool {
+	/** Software-Zeichenfläche auf einem Bild in Fensterpixeln. */
+	static final class AwtCanvas implements Canvas {
+		final BufferedImage image;
+		final Graphics2D g;
+		final Map<Object, BufferedImage> textures;
+		private final Deque<AffineTransform> stack = new ArrayDeque<AffineTransform>();
+		private final Font font = new Font(Font.MONOSPACED, Font.BOLD, 10);
+
+		AwtCanvas(int w, int h, Map<Object, BufferedImage> textures) {
+			image = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB);
+			g = image.createGraphics();
+			g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
+			g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_OFF);
+			g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_OFF);
+			// Ohne das verschiebt Java2D Formen um Bruchteile eines Pixels – zwischen den Arm-Streifen entstünden Haarlinien.
+			g.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL, RenderingHints.VALUE_STROKE_PURE);
+			this.textures = textures;
+		}
+
+		@Override
+		public void fill(int x1, int y1, int x2, int y2, int argb) {
+			if (x2 <= x1 || y2 <= y1 || (argb >>> 24) == 0) return;
+			g.setColor(new Color(argb, true));
+			g.fill(new java.awt.geom.Rectangle2D.Float(x1, y1, x2 - x1, y2 - y1));
+		}
+
+		@Override
+		public void text(String text, int x, int y, int argb, boolean shadow) {
+			if (text == null || (argb >>> 24) == 0) return;
+			g.setFont(font);
+			if (shadow) {
+				int a = argb >>> 24;
+				g.setColor(new Color(((argb >> 16) & 0xFF) / 4, ((argb >> 8) & 0xFF) / 4, (argb & 0xFF) / 4, a));
+				g.drawString(text, x + 1, y + 8);
+			}
+			g.setColor(new Color(argb, true));
+			g.drawString(text, x, y + 7);
+		}
+
+		@Override
+		public int textWidth(String text) {
+			return text == null ? 0 : text.codePointCount(0, text.length()) * 6;
+		}
+
+		@Override
+		public int lineHeight() {
+			return 9;
+		}
+
+		@Override
+		public String clip(String text, int maxWidth) {
+			int n = Math.max(0, maxWidth / 6);
+			return text.length() <= n ? text : text.substring(0, n);
+		}
+
+		@Override
+		public void flush() {
+		}
+
+		@Override
+		public void scissor(int x1, int y1, int x2, int y2) {
+		}
+
+		@Override
+		public void noScissor() {
+		}
+
+		@Override
+		public void raise(float z) {
+		}
+
+		@Override
+		public void push() {
+			stack.push(g.getTransform());
+		}
+
+		@Override
+		public void translate(float x, float y) {
+			g.translate(x, y);
+		}
+
+		@Override
+		public void scale(float factor) {
+			g.scale(factor, factor);
+		}
+
+		@Override
+		public void pop() {
+			g.setTransform(stack.pop());
+		}
+
+		@Override
+		public boolean images() {
+			return true;
+		}
+
+		@Override
+		public void image(TextureRef texture, float u, float v, int w, int h, int argb) {
+			BufferedImage src = textures.get(texture.id);
+			if (src == null || w <= 0 || h <= 0) return;
+			// Texel der Nenngröße → Pixel des Bildes (HD-Skins).
+			float fx = src.getWidth() / (float) texture.width, fy = src.getHeight() / (float) texture.height;
+			int tr = (argb >> 16) & 0xFF, tg = (argb >> 8) & 0xFF, tb = argb & 0xFF, ta = argb >>> 24;
+			if ((long) w * h <= 64) {
+				// Kleine Blits (Arm-Streifen, Gesicht) Texel für Texel: exakt, ohne Rundung des Bild-Zeichnens.
+				for (int y = 0; y < h; y++) {
+					for (int x = 0; x < w; x++) {
+						int px = Math.floorMod((int) Math.floor((u + x) * fx), src.getWidth());
+						int py = Math.floorMod((int) Math.floor((v + y) * fy), src.getHeight());
+						int p = src.getRGB(px, py);
+						int a = (p >>> 24) * ta / 255;
+						if (a == 0) continue;
+						g.setColor(new Color(((p >> 16) & 0xFF) * tr / 255, ((p >> 8) & 0xFF) * tg / 255, (p & 0xFF) * tb / 255, a));
+						g.fill(new java.awt.geom.Rectangle2D.Float(x, y, 1, 1));
+					}
+				}
+				return;
+			}
+			int sx = Math.max(0, Math.min(src.getWidth() - 1, Math.round(u * fx)));
+			int sy = Math.max(0, Math.min(src.getHeight() - 1, Math.round(v * fy)));
+			int sw = Math.max(1, Math.min(src.getWidth() - sx, Math.round(w * fx)));
+			int sh = Math.max(1, Math.min(src.getHeight() - sy, Math.round(h * fy)));
+			BufferedImage part = src.getSubimage(sx, sy, sw, sh);
+			if (argb != 0xFFFFFFFF) {
+				BufferedImage tinted = new BufferedImage(sw, sh, BufferedImage.TYPE_INT_ARGB);
+				for (int y = 0; y < sh; y++) {
+					for (int x = 0; x < sw; x++) {
+						int p = part.getRGB(x, y);
+						tinted.setRGB(x, y, ((p >>> 24) * ta / 255) << 24 | (((p >> 16) & 0xFF) * tr / 255) << 16
+								| (((p >> 8) & 0xFF) * tg / 255) << 8 | ((p & 0xFF) * tb / 255));
+					}
+				}
+				part = tinted;
+			}
+			g.drawImage(part, 0, 0, w, h, null);
+		}
+
+		@Override
+		public void rotate(float radians) {
+			g.rotate(radians);
+		}
+
+		@Override
+		public void scale(float sx, float sy) {
+			g.scale(sx, sy);
+		}
+	}
+
+	private final Map<Object, BufferedImage> textures = new HashMap<Object, BufferedImage>();
+
+	private Textures.Store store() {
+		return new Textures.Store() {
+			@Override
+			public TextureRef upload(String name, int width, int height, int[] argb) {
+				BufferedImage img = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
+				img.setRGB(0, 0, width, height, argb, 0, width);
+				textures.put(name, img);
+				return new TextureRef(name, width, height);
+			}
+
+			@Override
+			public void release(TextureRef texture) {
+				textures.remove(texture.id);
+			}
+
+			@Override
+			public TextureRef game(String location, int width, int height) {
+				return new TextureRef(location, width, height);
+			}
+
+			@Override
+			public Textures.DefaultSkin defaultSkin(UUID uuid) {
+				return new Textures.DefaultSkin(new TextureRef("skin", 64, 64), false);
+			}
+		};
+	}
+
+	/** Einfacher Test-Skin: grüne Arme mit dunklen Streifen und hellen Ecken an der Hand. */
+	private static BufferedImage testSkin(boolean slim) {
+		BufferedImage skin = new BufferedImage(64, 64, BufferedImage.TYPE_INT_ARGB);
+		int w = slim ? 3 : 4;
+		int[][] boxes = {{32, 48}, {40, 16}};
+		for (int[] b : boxes) {
+			for (int y = 0; y < 12; y++) {
+				for (int x = 0; x < 8 + 2 * w; x++) {
+					int rgb = y == 4 || y == 8 ? 0x00724A : 0x0BD666;
+					skin.setRGB(b[0] + x, b[1] + 4 + y, 0xFF000000 | rgb);
+				}
+				if (y == 11) {
+					for (int x : new int[]{0, 3, 4, 4 + w - 1, 4 + w, 4 + w + 3}) skin.setRGB(b[0] + x, b[1] + 4 + y, 0xFFFFFFFF);
+				}
+			}
+		}
+		for (int y = 8; y < 16; y++) for (int x = 8; x < 16; x++) skin.setRGB(x, y, 0xFFC68E6B);
+		for (int x = 8; x < 16; x++) skin.setRGB(x, 8, 0xFF4A3220);
+		skin.setRGB(10, 12, 0xFFFFFFFF);
+		skin.setRGB(13, 12, 0xFFFFFFFF);
+		return skin;
+	}
+
+	private static PhoneUi.Host host(final int w, final int h, final int gui, final boolean slim) {
+		return new PhoneUi.Host() {
+			@Override public int windowWidth() { return w; }
+			@Override public int windowHeight() { return h; }
+			@Override public int guiScale() { return gui; }
+			@Override public TextureRef skin() { return new TextureRef("skin", 64, 64); }
+			@Override public boolean slimSkin() { return slim; }
+			@Override public boolean sleeve(boolean left) { return true; }
+			@Override public String playerName() { return "PixelDEV_CAM"; }
+			@Override public String keyName(int rawKey) { return rawKey == 'H' ? "key.keyboard.h" : rawKey == 'R' ? "key.keyboard.r" : null; }
+			@Override public boolean keyDown(String keyName) { return false; }
+			@Override public String keyLabel(String keyName) { return keyName.substring(keyName.lastIndexOf('.') + 1).toUpperCase(); }
+			@Override public String paste() { return null; }
+			@Override public void click() { }
+			@Override public void close() { }
+		};
+	}
+
+	@Test
+	void render() throws Exception {
+		String outDir = System.getProperty("trsclient.test.phoneOut");
+		Assumptions.assumeTrue(outDir != null, "nur als Werkzeug");
+		System.setProperty("java.awt.headless", "true");
+		Path out = Paths.get(outDir);
+		Files.createDirectories(out);
+		boolean slim = Boolean.getBoolean("trsclient.test.phoneSlim");
+		String skinFile = System.getProperty("trsclient.test.phoneSkin");
+		textures.put("skin", skinFile != null ? ImageIO.read(new File(skinFile)) : testSkin(slim));
+		String bgFile = System.getProperty("trsclient.test.phoneBg");
+		BufferedImage bg = bgFile != null ? ImageIO.read(new File(bgFile)) : null;
+		I18n.use(System.getProperty("trsclient.test.phoneLang", "de"));
+		Textures.Store before = Textures.store();
+		Textures.replaceForTests(store());
+		Path work = Files.createTempDirectory("trs-reels-render");
+		try {
+			TrsModules modules = new TrsModules();
+			LocalReelsBackend backend = new LocalReelsBackend(work, TimeZone.getDefault());
+			Executor direct = new Executor() {
+				@Override
+				public void execute(Runnable r) {
+					r.run();
+				}
+			};
+			Reels reels = Reels.forTest(modules, backend, direct, TimeZone.getDefault());
+			long now = System.currentTimeMillis();
+
+			// Leerer Feed zuerst.
+			shot(reels, modules, bg, out, "leer-quer", 1920, 1080, 2, PhoneHold.LANDSCAPE, slim, false);
+			shot(reels, modules, bg, out, "leer-hochkant", 1920, 1080, 2, PhoneHold.PORTRAIT, slim, false);
+
+			String photos = System.getProperty("trsclient.test.phonePhotos");
+			if (photos != null) {
+				String[] files = photos.split(",");
+				for (int i = 0; i < files.length; i++) {
+					BufferedImage img = ImageIO.read(new File(files[i].trim()));
+					long at = now - (files.length - i) * 7200000L;
+					String id = backend.newId(at);
+					Path target = backend.newPhotoFile(id);
+					Files.createDirectories(target.getParent());
+					ImageIO.write(img, "png", target.toFile());
+					ReelsPost p = backend.post(id + ".png", img.getWidth(), img.getHeight(), img.getHeight() > img.getWidth(), false,
+							i % 2 == 0 ? "Schaut mal, wer bei mir eingezogen ist!" : "Aussicht hinter meiner Basis – und ein ziemlich langer Text dazu.",
+							"PixelDEV_CAM", at);
+					if (p != null && i == files.length - 1) {
+						reels.toggleLike(p.id);
+						reels.comment(p.id, "Rotkaeppchen", "Wie süß!", at + 1000);
+						reels.comment(p.id, "PixelDEV_CAM", "Der Panda wohnt jetzt bei mir, die Katze sowieso. Kommt vorbei!", at + 2000);
+						reels.comment(p.id, "Du", "Bin gleich da.", at + 3000);
+					}
+				}
+				int[][] sizes = {{1920, 1080, 2}, {1920, 1080, 4}, {1280, 720, 2}, {854, 480, 1}, {1280, 1024, 2}, {800, 1000, 2},
+						{2560, 1080, 3}, {3840, 2160, 4}};
+				for (int[] s : sizes) {
+					for (PhoneHold hold : PhoneHold.values()) {
+						String tag = (hold == PhoneHold.LANDSCAPE ? "quer" : "hochkant") + "-" + s[0] + "x" + s[1] + "-gui" + s[2];
+						shot(reels, modules, bg, out, "feed-" + tag, s[0], s[1], s[2], hold, slim, false);
+					}
+				}
+				shot(reels, modules, bg, out, "kommentare-quer", 1920, 1080, 2, PhoneHold.LANDSCAPE, slim, true);
+				shot(reels, modules, bg, out, "kommentare-hochkant", 1920, 1080, 2, PhoneHold.PORTRAIT, slim, true);
+				shot(reels, modules, bg, out, "kommentare-hochkant-854", 854, 480, 1, PhoneHold.PORTRAIT, slim, true);
+				// Zweiter Post (anders ausgerichtet): eingepasst statt beschnitten.
+				if (files.length > 1) {
+					pageShot(reels, modules, bg, out, "seite2-quer", PhoneHold.LANDSCAPE, slim);
+					pageShot(reels, modules, bg, out, "seite2-hochkant", PhoneHold.PORTRAIT, slim);
+				}
+			}
+		} finally {
+			Textures.replaceForTests(before);
+			Reels.clearForTest();
+			I18n.use("en");
+		}
+	}
+
+	private void shot(Reels reels, TrsModules modules, BufferedImage bg, Path out, String name, int w, int h, int gui,
+			PhoneHold hold, boolean slim, boolean comments) throws Exception {
+		modules.reels.hold.set(hold);
+		PhoneUi ui = new PhoneUi(reels, host(w, h, gui, slim));
+		if (comments) ui.keyPressed(0, UiKey.ENTER, false);
+		write(ui, bg, out, name, w, h, gui);
+	}
+
+	private void pageShot(Reels reels, TrsModules modules, BufferedImage bg, Path out, String name, PhoneHold hold, boolean slim)
+			throws Exception {
+		modules.reels.hold.set(hold);
+		PhoneUi ui = new PhoneUi(reels, host(1920, 1080, 2, slim));
+		ui.current();
+		ui.mouseScrolled(0, 0, -1);
+		write(ui, bg, out, name, 1920, 1080, 2);
+	}
+
+	private void write(PhoneUi ui, BufferedImage bg, Path out, String name, int w, int h, int gui) throws Exception {
+		AwtCanvas c = null;
+		// Drei Bilder: Fotos werden im ersten angefordert und in den nächsten hochgeladen.
+		for (int i = 0; i < 4; i++) {
+			c = new AwtCanvas(w, h, textures);
+			if (bg != null) c.g.drawImage(bg, 0, 0, w, h, null);
+			else c.fill(0, 0, w, h, 0xFF6FA8DC);
+			// Wie im Spiel: die Fläche arbeitet in GUI-Einheiten.
+			c.g.scale(gui, gui);
+			ui.testOpenFully();
+			ui.render(c, w / gui, h / gui, -1, -1);
+		}
+		ImageIO.write(c.image, "png", out.resolve(name + ".png").toFile());
+		ui.dispose();
+	}
+}
