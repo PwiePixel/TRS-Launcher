@@ -137,6 +137,11 @@ public final class TrsClient implements ClientModInitializer {
 		dev.theredstonee.trsclient.core.map.MapEngine.init(modules, FabricLoader.getInstance().getConfigDir());
 		// Notizen je Welt (config/trsclient/notes): Seite im TRS-Menü, Taste, angeheftete Notiz im HUD.
 		dev.theredstonee.trsclient.core.notes.Notes.init(modules, FabricLoader.getInstance().getConfigDir(), message -> LOGGER.info(message));
+		// MC-Reels (erste Testversion, vorerst nur Fabric 26.2): Handy mit Foto-Feed, alles lokal unter <Spielordner>/trs-reels.
+		// Nur hier wird das Modul freigeschaltet – überall sonst bleibt es verborgen.
+		//? if >=26.2 && <26.3 {
+		/*dev.theredstonee.trsclient.reels.ReelsHooks.init(modules, FabricLoader.getInstance().getGameDir());
+		*///?}
 		// Kamera-Fahrten (config/trsclient-cinematic.json, Tasten in den Steuerungen).
 		dev.theredstonee.trsclient.cinematic.CinematicHooks.init(modules, FabricLoader.getInstance().getConfigDir());
 		waypoints = new dev.theredstonee.trsclient.feature.Waypoints(modules,
@@ -154,6 +159,8 @@ public final class TrsClient implements ClientModInitializer {
 			saveConfig();
 			waypoints.save();
 			if (dev.theredstonee.trsclient.core.notes.Notes.get() != null) dev.theredstonee.trsclient.core.notes.Notes.get().save();
+			// MC-Reels (gibt es nur dort, wo ReelsHooks.init lief): Feed sichern.
+			if (dev.theredstonee.trsclient.core.reels.Reels.get() != null) dev.theredstonee.trsclient.core.reels.Reels.get().save();
 			if (dev.theredstonee.trsclient.core.map.MapEngine.get() != null) dev.theredstonee.trsclient.core.map.MapEngine.get().shutdown();
 		});
 		String version = FabricLoader.getInstance().getModContainer(MOD_ID)
@@ -358,6 +365,19 @@ public final class TrsClient implements ClientModInitializer {
 			for (int i = 0; i < modules.hotkeyKeys.length; i++) {
 				if (moduleKeys.pressed(modules.hotkeyKeys[i])) chat.onHotkey(i);
 			}
+			// MC-Reels: Handy herausholen. Dieselbe Taste steckt es weg (das liest das Handy selbst) – deshalb erst wieder
+			// öffnen, wenn sie einmal losgelassen war (PhoneKeyGate).
+			//? if >=26.2 && <26.3 {
+			/*dev.theredstonee.trsclient.core.reels.Reels reels = dev.theredstonee.trsclient.core.reels.Reels.get();
+			if (reels != null) {
+				boolean pressed = moduleKeys.pressed(modules.reels.openKey);
+				boolean down = modules.reels.openKey.isBound() && dev.theredstonee.trsclient.compat.Keys.isDown(
+						dev.theredstonee.trsclient.core.input.KeyCombo.main(modules.reels.openKey.get()));
+				if (reels.keyGate().shouldOpen(pressed, down) && mc.player != null && modules.reels.reels.isEnabled()) {
+					dev.theredstonee.trsclient.reels.ReelsHooks.open();
+				}
+			}
+			*///?}
 		} else {
 			moduleKeys.releaseAll();
 		}
