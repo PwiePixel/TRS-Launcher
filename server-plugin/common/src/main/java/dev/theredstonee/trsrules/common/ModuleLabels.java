@@ -95,6 +95,7 @@ public final class ModuleLabels {
 		put("queueAlerts", "Queue & Alerts");
 		put("streamerMode", "Streamer Mode");
 		put("minigames", "Minigames");
+		put("mcReels", "MC-Reels");
 	}
 
 	private ModuleLabels() {
