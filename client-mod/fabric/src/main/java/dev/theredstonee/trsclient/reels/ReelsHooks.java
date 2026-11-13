@@ -260,7 +260,8 @@ public final class ReelsHooks {
 		if (phone == null || !phone.selfieActive()) return 0f;
 		// Erst umdrehen, wenn das Bild der normalen Sicht für den Platz hinter dem Handy gesichert ist (beforeGui).
 		// Während einer Kamera-Fahrt gar nicht: sie bestimmt das Bild allein.
-		if ((!backdropValid && !backdropBroken) || cameraRide()) return 0f;
+		if ((!backdropValid && !backdropBroken) || cameraRide()
+				|| dev.theredstonee.trsclient.cinematic.CinematicHooks.frame() != null) return 0f;
 		selfieFrame = true;
 		return SELFIE_DISTANCE;
 	}

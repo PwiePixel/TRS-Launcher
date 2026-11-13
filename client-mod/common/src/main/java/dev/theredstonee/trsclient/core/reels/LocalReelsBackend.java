@@ -71,7 +71,7 @@ public final class LocalReelsBackend implements ReelsBackend {
 	};
 
 	/**
-	 * @param dir  Ordner des Feeds (z. B. {@code <Spielordner>/trs-reels}); null = nur im Speicher
+	 * @param dir  Ordner des Feeds (z. B. {@code config/trsclient/reels}); null = nur im Speicher
 	 * @param zone Zeitzone für die Kalendertage der Streak
 	 */
 	public LocalReelsBackend(Path dir, TimeZone zone) {
