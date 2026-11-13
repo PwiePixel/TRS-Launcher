@@ -43,8 +43,9 @@ import java.util.TimeZone;
  * Hand weg, Minimap weg, Schnellleiste da).
  *
  * <p>Kamera: „Foto“ hochkant (Sucher, Auslöser per echtem Klick, „Neuer Post“ mit Text, Posten mit Enter), „Selfie“
- * (umschalten, auslösen mit Enter, „Nochmal“ löscht das Foto, zweites Selfie posten), dasselbe quer bis „Neuer Post“
- * und Esc. Die beiden geposteten Fotos liegen danach als {@code …-reels-foto.png} und {@code …-reels-selfie.png} bei
+ * (umschalten, auslösen mit Enter – ein zweites Enter gleich danach postet nicht –, „Nochmal“ löscht das Foto, zweites
+ * Selfie posten), dasselbe quer bis „Neuer Post“ und Esc. Beim Selfie steht hinter dem Handy weiter die normale Sicht
+ * (Bild 15a vor und 15 nach dem Umschalten: außerhalb des Handys gleich, keine eigene Figur zwischen den Armen). Die beiden geposteten Fotos liegen danach als {@code …-reels-foto.png} und {@code …-reels-selfie.png} bei
  * den Bildern und gehören ebenfalls angesehen: darauf dürfen weder HUD noch Chat, Handy, Arme, Schleier oder ein
  * Block-Umriss sein (der Blick zeigt beim Foto auf einen Block in Reichweite, eine Chat-Zeile steht auf dem Bildschirm).
  *
@@ -495,6 +496,14 @@ public final class ReelsTest {
 				next(15);
 				return;
 			case 41:
+				if (!applied) {
+					// Zum Vergleich: die Kamera auf „Foto“ – hinter dem Handy muss das Selfie danach genauso aussehen.
+					AutoTest.shot(mc, "trsclient-reels-15a-kamera-vor-selfie");
+					applied = true;
+					wait = 15;
+					return;
+				}
+				applied = false;
 				clickSpot(mc, "camSelfie");
 				check("echter Klick auf „Selfie“ schaltet um", ui.testSelfie() && ui.selfieActive());
 				// Kamera dreht sich, der Sucher holt ein neues Bild.
@@ -504,6 +513,8 @@ public final class ReelsTest {
 				check("Haken der Kamera-Ausrichtung greift (Camera.alignWithEntity)", ReelsHooks.cameraHookSeen());
 				check("Haken der Effekte vor dem Gesicht greift (ScreenEffectRenderer.submit)", ReelsHooks.effectsHookSeen());
 				check("Selfie: die Kamera des Spiels ist losgelöst (die eigene Figur wird gezeichnet)", Mc.camera().isDetached());
+				check("Selfie: hinter dem Handy liegt wieder die normale Sicht (keine eigene Figur zwischen den Armen)",
+						ReelsHooks.backdropSeen() && !ReelsHooks.backdropBroken());
 				check("die Perspektive in den Optionen bleibt die Ich-Sicht", mc.options.getCameraType() == CameraType.FIRST_PERSON);
 				AutoTest.shot(mc, "trsclient-reels-15-kamera-selfie");
 				next(15);
@@ -512,10 +523,20 @@ public final class ReelsTest {
 				// Auslösen mit Enter (echte Taste).
 				AutoTest.key(mc, Keys.code("key.keyboard.enter"));
 				check("Enter löst aus", ui.testBusy() || ui.testView() == PhoneUi.View.COMPOSE);
-				next(5);
+				next(0);
 				return;
 			case 44: {
-				if (!waitFor(ui.testView() == PhoneUi.View.COMPOSE, 100)) return;
+				// In jedem Tick nachsehen: das zweite Enter soll gleich nach dem Öffnen von „Neuer Post“ kommen.
+				if (ui.testView() != PhoneUi.View.COMPOSE && waited++ < 500) return;
+				waited = 0;
+				if (ui.testView() == PhoneUi.View.COMPOSE && !ui.testPostArmed()) {
+					int posts = reels.backend().feed().size();
+					AutoTest.key(mc, Keys.code("key.keyboard.enter"));
+					check("ein zweites Enter gleich nach dem Auslösen postet das Foto nicht",
+							ui.testView() == PhoneUi.View.COMPOSE && reels.backend().feed().size() == posts);
+				} else {
+					TrsClient.LOGGER.info("[Autotest] Reels: Hinweis – „Neuer Post“ war schon zu lange offen, das zweite Enter wurde nicht geprüft");
+				}
 				Reels.Shot shot = ui.testShot();
 				check("Selfie aufgenommen", shot != null && shot.selfie && Files.isRegularFile(shot.file));
 				check("in „Neuer Post“ schaut die Kamera des Spiels wieder normal", !ui.selfieActive());
@@ -725,9 +746,12 @@ public final class ReelsTest {
 				next(10);
 				return;
 			case 73: {
-				// Wegstecken mit der Handy-Taste (echte Taste H; sie gilt, weil sie seit dem Öffnen „los“ war).
-				AutoTest.key(mc, Keys.code("key.keyboard.h"));
-				check("Taste H steckt das Handy weg (Schließen läuft)", ui.isClosing() || !ReelsHooks.phoneOpen());
+				// Wegstecken mit der Handy-Taste (echte Taste, ab Werk K; sie gilt, weil sie seit dem Öffnen „los“ war).
+				String openKey = dev.theredstonee.trsclient.core.input.KeyCombo.main(modules.reels.openKey.get());
+				check("die Handy-Taste ist ab Werk K (H gehört der Schaltungs-Bibliothek)", "key.keyboard.k".equals(openKey)
+						&& !openKey.equals(dev.theredstonee.trsclient.core.input.KeyCombo.main(modules.circuits.hideKey.get())));
+				AutoTest.key(mc, Keys.code(openKey));
+				check("die Handy-Taste steckt das Handy weg (Schließen läuft)", ui.isClosing() || !ReelsHooks.phoneOpen());
 				if (!ui.isClosing() && ReelsHooks.phoneOpen()) ui.requestClose();
 				next(30);
 				return;
@@ -773,6 +797,35 @@ public final class ReelsTest {
 				next(10);
 				return;
 			}
+			case 78:
+				// Eine Außenansicht, die eine TRS-Funktion hält (hier Freelook), merkt sich das Handy nicht.
+				TrsClient.get().pvp().forceFreelook(40F);
+				next(10);
+				return;
+			case 79: {
+				boolean third = mc.options.getCameraType() != CameraType.FIRST_PERSON;
+				check("Freelook hat die Außenansicht eingestellt", third && TrsClient.get().pvp().freelook().active());
+				boolean opened = ReelsHooks.open();
+				ui = ReelsHooks.phone();
+				check("Handy geht während des Freelooks auf, in der Ich-Sicht, und merkt sich dessen Außenansicht nicht",
+						opened && ui != null && mc.options.getCameraType() == CameraType.FIRST_PERSON && ReelsHooks.viewBefore() == null);
+				next(10);
+				return;
+			}
+			case 80:
+				// Der Freelook endet, während das Handy draußen ist.
+				TrsClient.get().pvp().forceFreelook(Float.NaN);
+				next(10);
+				return;
+			case 81: {
+				check("Freelook ist aus, das Handy ist noch draußen (Ich-Sicht)", !TrsClient.get().pvp().freelook().active()
+						&& ReelsHooks.phoneOpen() && mc.options.getCameraType() == CameraType.FIRST_PERSON);
+				Mc.setScreen(null);
+				check("nach dem Wegstecken bleibt die Ich-Sicht (keine veraltete Außenansicht)",
+						mc.options.getCameraType() == CameraType.FIRST_PERSON);
+				next(10);
+				return;
+			}
 			default:
 				finish(mc);
 		}
@@ -784,6 +837,7 @@ public final class ReelsTest {
 		stopped = true;
 		try {
 			ReelsHooks.testBlur(false);
+			TrsClient.get().pvp().forceFreelook(Float.NaN);
 			if (before != null) TrsClient.get().modules().registry.apply(before);
 			guiScale(mc, guiScaleBefore);
 			mc.options.setCameraType(CameraType.FIRST_PERSON);

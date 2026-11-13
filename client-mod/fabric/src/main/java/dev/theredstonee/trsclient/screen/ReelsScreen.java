@@ -46,6 +46,13 @@ public final class ReelsScreen extends TrsUiScreen {
 		}
 	}
 
+	/^* In jedem Tick: Ich-Sicht, auch wenn währenddessen etwas die Perspektive umstellt (siehe ReelsHooks). *^/
+	@Override
+	public void tick() {
+		super.tick();
+		ReelsHooks.keepFirstPerson();
+	}
+
 	/^* Auch wenn etwas anderes den Bildschirm ersetzt (Tod, Verbindung getrennt): Texturen frei, Feed gesichert. *^/
 	@Override
 	public void removed() {

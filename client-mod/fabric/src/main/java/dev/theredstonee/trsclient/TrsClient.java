@@ -137,10 +137,11 @@ public final class TrsClient implements ClientModInitializer {
 		dev.theredstonee.trsclient.core.map.MapEngine.init(modules, FabricLoader.getInstance().getConfigDir());
 		// Notizen je Welt (config/trsclient/notes): Seite im TRS-Menü, Taste, angeheftete Notiz im HUD.
 		dev.theredstonee.trsclient.core.notes.Notes.init(modules, FabricLoader.getInstance().getConfigDir(), message -> LOGGER.info(message));
-		// MC-Reels (erste Testversion, vorerst nur Fabric 26.2): Handy mit Foto-Feed, alles lokal unter <Spielordner>/trs-reels.
+		// MC-Reels (erste Testversion, vorerst nur Fabric 26.2): Handy mit Foto-Feed, alles lokal unter config/trsclient/reels.
 		// Nur hier wird das Modul freigeschaltet – überall sonst bleibt es verborgen.
 		//? if >=26.2 && <26.3 {
-		/*dev.theredstonee.trsclient.reels.ReelsHooks.init(modules, FabricLoader.getInstance().getGameDir());
+		/*dev.theredstonee.trsclient.reels.ReelsHooks.init(modules, FabricLoader.getInstance().getGameDir(),
+				FabricLoader.getInstance().getConfigDir());
 		*///?}
 		// Kamera-Fahrten (config/trsclient-cinematic.json, Tasten in den Steuerungen).
 		dev.theredstonee.trsclient.cinematic.CinematicHooks.init(modules, FabricLoader.getInstance().getConfigDir());
@@ -159,8 +160,8 @@ public final class TrsClient implements ClientModInitializer {
 			saveConfig();
 			waypoints.save();
 			if (dev.theredstonee.trsclient.core.notes.Notes.get() != null) dev.theredstonee.trsclient.core.notes.Notes.get().save();
-			// MC-Reels (gibt es nur dort, wo ReelsHooks.init lief): Feed sichern.
-			if (dev.theredstonee.trsclient.core.reels.Reels.get() != null) dev.theredstonee.trsclient.core.reels.Reels.get().save();
+			// MC-Reels (gibt es nur dort, wo ReelsHooks.init lief): kein Foto ohne Post liegen lassen, Feed sichern.
+			if (dev.theredstonee.trsclient.core.reels.Reels.get() != null) dev.theredstonee.trsclient.core.reels.Reels.get().stop();
 			if (dev.theredstonee.trsclient.core.map.MapEngine.get() != null) dev.theredstonee.trsclient.core.map.MapEngine.get().shutdown();
 		});
 		String version = FabricLoader.getInstance().getModContainer(MOD_ID)
@@ -208,6 +209,9 @@ public final class TrsClient implements ClientModInitializer {
 		//? if >=1.21.6 {
 		/*HudElementRegistry.attachElementAfter(VanillaHudElements.PLAYER_LIST, id("hud"), (g, delta) -> hud.render(Gfx.of(g)));
 		HudElementRegistry.replaceElement(VanillaHudElements.CROSSHAIR, vanilla -> (g, delta) -> {
+			// MC-Reels: kein Fadenkreuz, solange das Handy draußen ist (in hohen Fenstern stünde es über dem Handy).
+			//? if >=26.2 && <26.3
+			if (dev.theredstonee.trsclient.reels.ReelsHooks.phoneOpen()) return;
 			if (hud.crosshair().replacesVanilla()) hud.crosshair().drawInGame(Gfx.of(g));
 			//? if >=26.1 {
 			else vanilla.extractRenderState(g, delta);
