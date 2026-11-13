@@ -13,6 +13,7 @@ import dev.theredstonee.trsclient.core.reels.ArmRig;
 import dev.theredstonee.trsclient.core.reels.LocalReelsBackend;
 import dev.theredstonee.trsclient.core.reels.PhoneHold;
 import dev.theredstonee.trsclient.core.reels.PhoneLayout;
+import dev.theredstonee.trsclient.core.reels.PhotoFrame;
 import dev.theredstonee.trsclient.core.reels.Reels;
 import dev.theredstonee.trsclient.core.reels.ReelsBackend;
 import dev.theredstonee.trsclient.core.reels.ReelsPost;
@@ -41,8 +42,14 @@ import java.util.TimeZone;
  * die Bilder liegen als {@code screenshots/trsclient-<Version>-reels-*.png} daneben und gehören angesehen (Arme,
  * Hand weg, Minimap weg, Schnellleiste da).
  *
+ * <p>Kamera: „Foto“ hochkant (Sucher, Auslöser per echtem Klick, „Neuer Post“ mit Text, Posten mit Enter), „Selfie“
+ * (umschalten, auslösen mit Enter, „Nochmal“ löscht das Foto, zweites Selfie posten), dasselbe quer bis „Neuer Post“
+ * und Esc. Die beiden geposteten Fotos liegen danach als {@code …-reels-foto.png} und {@code …-reels-selfie.png} bei
+ * den Bildern und gehören ebenfalls angesehen: darauf dürfen weder HUD noch Chat, Handy, Arme, Schleier oder ein
+ * Block-Umriss sein (der Blick zeigt beim Foto auf einen Block in Reichweite, eine Chat-Zeile steht auf dem Bildschirm).
+ *
  * <p>Das Handy wird mit {@link ReelsHooks#open()} geöffnet: die Handy-Taste fragt den echten Tastenzustand ab, den
- * ein Test nicht setzen kann. Kamera und Posten kommen mit dem nächsten Bauschritt dazu.
+ * ein Test nicht setzen kann.
  *^/
 public final class ReelsTest {
 	private static final String WORLD = "trs-reels-" + AutoTest.MC_VERSION;
@@ -57,8 +64,12 @@ public final class ReelsTest {
 	private static final int[] SCENE = {373, 276};
 	private static final float SCENE_YAW = -60f;
 	private static final String COMMENT = "Sieht super aus!";
+	/^* Blickrichtungen für das Foto: {Grad zur Seite von der Szene aus, Grad nach unten}. *^/
+	private static final float[][] AIMS = {{0, 24}, {-30, 24}, {-55, 26}, {35, 26}, {-90, 28}, {180, 26}, {0, 42}, {0, 58}};
+	private static final String CAPTION = "Aussicht am Fluss";
+	private static final String SELFIE_CAPTION = "Ich war auch da";
 	/^* Nach so vielen Ticks bricht der Test ab, statt Gradle hängen zu lassen. *^/
-	private static final int WATCHDOG_TICKS = 9000;
+	private static final int WATCHDOG_TICKS = 14000;
 
 	private int phase;
 	private int wait;
@@ -74,6 +85,10 @@ public final class ReelsTest {
 	private PhoneUi ui;
 	private final int[][] phoneAtScale = new int[SCALES.length][];
 	private String likedPost;
+	private int feedBefore;
+	private Path photoFile;
+	private Path selfieFile;
+	private Path retryFile;
 
 	public static void install() {
 		ReelsTest test = new ReelsTest();
@@ -379,6 +394,173 @@ public final class ReelsTest {
 				next(5);
 				return;
 			case 32: {
+				// --- Kamera, „Foto“ (hochkant) ---
+				// Der Blick soll einen Block in Reichweite treffen (sein Umriss darf auf keinem Foto sein): ein paar
+				// Richtungen durchprobieren, bis einer anvisiert ist (am Ufer trifft der Blick sonst nur Wasser).
+				if (!applied) {
+					look(mc, SCENE_YAW + AIMS[index][0], AIMS[index][1]);
+					applied = true;
+					wait = 8;
+					return;
+				}
+				applied = false;
+				if (!blockAimed(mc) && ++index < AIMS.length) return;
+				TrsClient.LOGGER.info("[Autotest] Reels: Blick für das Foto: {}° zur Seite, {}° nach unten",
+						AIMS[Math.min(index, AIMS.length - 1)][0], AIMS[Math.min(index, AIMS.length - 1)][1]);
+				index = 0;
+				// Eine frische Chat-Zeile steht auf dem Bildschirm – auch sie darf nicht auf das Foto.
+				ChatLines.addMessage(Mc.text("MC-Reels-Selbsttest: Auch diese Zeile darf nicht auf dem Foto sein."));
+				feedBefore = reels.backend().feed().size();
+				next(20);
+				return;
+			}
+			case 33: {
+				check("der Blick trifft einen Block in Reichweite (Probe für den Umriss)", blockAimed(mc));
+				clickSpot(mc, "camera");
+				check("echter Klick auf den Kamera-Knopf öffnet die Kamera", ui.testView() == PhoneUi.View.CAMERA);
+				if (ui.testView() != PhoneUi.View.CAMERA) {
+					// Ohne Kamera sind die folgenden Schritte sinnlos.
+					phase = 50;
+					return;
+				}
+				next(10);
+				return;
+			}
+			case 34: {
+				if (!waitFor(ui.testViewfinder() != null, 80)) return;
+				int[] finder = ui.testViewfinder();
+				int[] screen = spot("screen");
+				check("Haken vor der Oberfläche greift (GuiRenderer.render)", ReelsHooks.frameHookSeen());
+				check("der Sucher zeigt ein Bild der Welt", finder != null);
+				if (finder != null) {
+					check("Sucher-Textur " + finder[0] + "×" + finder[1] + " ist mindestens 0,9 × so breit wie der Sucher ("
+							+ screen[2] + "×" + screen[3] + " Fensterpixel) – nichts wird hochskaliert", finder[0] >= 0.9 * screen[2]
+							&& finder[1] >= 0.9 * screen[3]);
+				}
+				check("„Foto“ dreht die Kamera des Spiels nicht", !ui.selfieActive() && !Mc.camera().isDetached());
+				AutoTest.shot(mc, "trsclient-reels-12-kamera-foto");
+				next(15);
+				return;
+			}
+			case 35:
+				clickSpot(mc, "camShutter");
+				check("echter Klick auf den Auslöser: Aufnahme läuft", ui.testBusy() || ui.testView() == PhoneUi.View.COMPOSE);
+				next(5);
+				return;
+			case 36: {
+				if (!waitFor(ui.testView() == PhoneUi.View.COMPOSE, 100)) return;
+				Reels.Shot shot = ui.testShot();
+				check("nach dem Auslösen öffnet sich „Neuer Post“", ui.testView() == PhoneUi.View.COMPOSE && shot != null);
+				if (shot != null) {
+					photoFile = shot.file;
+					int[] want = photoSize(PhoneHold.PORTRAIT);
+					check("Foto ist gespeichert (" + shot.file + ")", Files.isRegularFile(shot.file));
+					check("Foto hochkant ist " + want[0] + "×" + want[1] + " (mittiger Ausschnitt, nicht vergrößert) – ist "
+							+ shot.width + "×" + shot.height, shot.width == want[0] && shot.height == want[1] && shot.portrait && !shot.selfie);
+					check("Foto liegt im Foto-Ordner des Feeds, nicht bei den Bildschirmfotos",
+							dir(reels) != null && shot.file.startsWith(dir(reels).resolve("photos")));
+				}
+				for (int i = 0; i < CAPTION.length(); i++) ui.inputChar(CAPTION.charAt(i));
+				next(10);
+				return;
+			}
+			case 37:
+				AutoTest.shot(mc, "trsclient-reels-13-posten");
+				next(15);
+				return;
+			case 38: {
+				// Enter postet (echte Taste).
+				AutoTest.key(mc, Keys.code("key.keyboard.enter"));
+				List<ReelsPost> feed = reels.backend().feed();
+				check("Enter postet: " + (feedBefore + 1) + " Posts im Feed (sind " + feed.size() + ")", feed.size() == feedBefore + 1);
+				ReelsPost top = feed.isEmpty() ? null : feed.get(0);
+				check("der neue Post steht vorn, mit Text und Namen", top != null && CAPTION.equals(top.caption)
+						&& mc.getUser().getName().equals(top.author) && top.portrait && !top.selfie);
+				check("Streak ist 1 (" + reels.backend().streak(System.currentTimeMillis()) + ")",
+						reels.backend().streak(System.currentTimeMillis()) == 1);
+				check("zurück im Feed auf Seite 1, mit Meldung „" + ui.testToast() + "“", ui.testView() == PhoneUi.View.FEED
+						&& ui.testPage() == 0 && ui.testToast() != null);
+				next(15);
+				return;
+			}
+			case 39:
+				AutoTest.shot(mc, "trsclient-reels-14-gepostet");
+				next(15);
+				return;
+			case 40:
+				// --- Kamera, „Selfie“ --- (wieder der Blick über den Fluss; hinter dem Spieler stehen Bäume)
+				look(mc, SCENE_YAW, 4f);
+				clickSpot(mc, "camera");
+				check("Kamera ist wieder offen", ui.testView() == PhoneUi.View.CAMERA);
+				next(15);
+				return;
+			case 41:
+				clickSpot(mc, "camSelfie");
+				check("echter Klick auf „Selfie“ schaltet um", ui.testSelfie() && ui.selfieActive());
+				// Kamera dreht sich, der Sucher holt ein neues Bild.
+				next(50);
+				return;
+			case 42:
+				check("Haken der Kamera-Ausrichtung greift (Camera.alignWithEntity)", ReelsHooks.cameraHookSeen());
+				check("Haken der Effekte vor dem Gesicht greift (ScreenEffectRenderer.submit)", ReelsHooks.effectsHookSeen());
+				check("Selfie: die Kamera des Spiels ist losgelöst (die eigene Figur wird gezeichnet)", Mc.camera().isDetached());
+				check("die Perspektive in den Optionen bleibt die Ich-Sicht", mc.options.getCameraType() == CameraType.FIRST_PERSON);
+				AutoTest.shot(mc, "trsclient-reels-15-kamera-selfie");
+				next(15);
+				return;
+			case 43:
+				// Auslösen mit Enter (echte Taste).
+				AutoTest.key(mc, Keys.code("key.keyboard.enter"));
+				check("Enter löst aus", ui.testBusy() || ui.testView() == PhoneUi.View.COMPOSE);
+				next(5);
+				return;
+			case 44: {
+				if (!waitFor(ui.testView() == PhoneUi.View.COMPOSE, 100)) return;
+				Reels.Shot shot = ui.testShot();
+				check("Selfie aufgenommen", shot != null && shot.selfie && Files.isRegularFile(shot.file));
+				check("in „Neuer Post“ schaut die Kamera des Spiels wieder normal", !ui.selfieActive());
+				retryFile = shot == null ? null : shot.file;
+				clickSpot(mc, "composeRetry");
+				check("„Nochmal“ führt zurück zur Kamera (weiter auf „Selfie“)", ui.testView() == PhoneUi.View.CAMERA && ui.testSelfie());
+				next(10);
+				return;
+			}
+			case 45:
+				if (!waitFor(retryFile == null || !Files.exists(retryFile), 40)) return;
+				check("„Nochmal“ hat das Foto gelöscht (" + retryFile + ")", retryFile != null && !Files.exists(retryFile));
+				// Der Sucher braucht wieder ein Bild von vorn.
+				next(40);
+				return;
+			case 46:
+				clickSpot(mc, "camShutter");
+				next(5);
+				return;
+			case 47: {
+				if (!waitFor(ui.testView() == PhoneUi.View.COMPOSE, 100)) return;
+				Reels.Shot shot = ui.testShot();
+				check("zweites Selfie aufgenommen", shot != null && shot.selfie && Files.isRegularFile(shot.file));
+				selfieFile = shot == null ? null : shot.file;
+				for (int i = 0; i < SELFIE_CAPTION.length(); i++) ui.inputChar(SELFIE_CAPTION.charAt(i));
+				next(10);
+				return;
+			}
+			case 48:
+				AutoTest.shot(mc, "trsclient-reels-15b-selfie-posten");
+				next(15);
+				return;
+			case 49: {
+				clickSpot(mc, "composePost");
+				List<ReelsPost> feed = reels.backend().feed();
+				ReelsPost top = feed.isEmpty() ? null : feed.get(0);
+				check("echter Klick auf „Posten“: " + (feedBefore + 2) + " Posts, das Selfie vorn", feed.size() == feedBefore + 2
+						&& top != null && top.selfie && SELFIE_CAPTION.equals(top.caption));
+				check("Streak bleibt 1", reels.backend().streak(System.currentTimeMillis()) == 1);
+				check("nach dem Posten ist das Selfie aus (Kamera des Spiels normal)", !ui.selfieActive());
+				// Auf dem nächsten Bild soll die Meldung nicht mehr stehen.
+				next(90);
+				return;
+			}
+			case 50: {
 				AutoTest.key(mc, Keys.code("key.keyboard.r"));
 				boolean rotated = ui.testHold() == PhoneHold.LANDSCAPE;
 				check("Taste R dreht zurück auf quer", rotated);
@@ -388,25 +570,94 @@ public final class ReelsTest {
 				next(30);
 				return;
 			}
-			case 33:
+			case 51:
 				AutoTest.shot(mc, "trsclient-reels-11d-quer-" + (playerSlim(mc) ? "breit" : "slim"));
 				next(15);
 				return;
-			case 34:
+			case 52:
+				// --- Kamera quer ---
+				ui.testForceSlim(null);
+				clickSpot(mc, "camera");
+				check("Kamera öffnet sich auch quer (Knopf in der rechten Spalte)", ui.testView() == PhoneUi.View.CAMERA);
+				next(10);
+				return;
+			case 53: {
+				// Die Kamera merkt sich „Selfie“, solange das Handy draußen ist.
+				check("die Kamera steht noch auf „Selfie“", ui.testSelfie());
+				next(50);
+				return;
+			}
+			case 54:
+				AutoTest.shot(mc, "trsclient-reels-16b-quer-kamera-selfie");
+				next(15);
+				return;
+			case 55:
+				// Tab wechselt zurück zu „Foto“ (echte Taste).
+				AutoTest.key(mc, Keys.code("key.keyboard.tab"));
+				check("Tab schaltet auf „Foto“", !ui.testSelfie() && !ui.selfieActive());
+				look(mc, SCENE_YAW, 10f);
+				next(50);
+				return;
+			case 56: {
+				int[] finder = ui.testViewfinder();
+				int[] screen = spot("screen");
+				check("Sucher quer: Textur " + (finder == null ? "fehlt" : finder[0] + "×" + finder[1]) + " für " + screen[2] + "×"
+						+ screen[3] + " Fensterpixel", finder != null && finder[0] >= 0.9 * screen[2] && finder[1] >= 0.9 * screen[3]);
+				AutoTest.shot(mc, "trsclient-reels-16-quer-kamera");
+				next(15);
+				return;
+			}
+			case 57:
+				clickSpot(mc, "camShutter");
+				next(5);
+				return;
+			case 58: {
+				if (!waitFor(ui.testView() == PhoneUi.View.COMPOSE, 100)) return;
+				Reels.Shot shot = ui.testShot();
+				int[] want = photoSize(PhoneHold.LANDSCAPE);
+				check("Foto quer ist " + want[0] + "×" + want[1] + (shot == null ? "" : " – ist " + shot.width + "×" + shot.height),
+						shot != null && shot.width == want[0] && shot.height == want[1] && !shot.portrait);
+				retryFile = shot == null ? null : shot.file;
+				for (int i = 0; i < CAPTION.length(); i++) ui.inputChar(CAPTION.charAt(i));
+				next(10);
+				return;
+			}
+			case 59:
+				AutoTest.shot(mc, "trsclient-reels-16c-quer-posten");
+				next(15);
+				return;
+			case 60:
+				// Esc in „Neuer Post“: Foto verwerfen, zurück zur Kamera (echte Taste).
+				AutoTest.key(mc, Keys.code("key.keyboard.escape"));
+				check("Esc in „Neuer Post“ führt zurück zur Kamera, das Handy bleibt offen",
+						ui.testView() == PhoneUi.View.CAMERA && ReelsHooks.phoneOpen() && !ui.isClosing());
+				next(10);
+				return;
+			case 61: {
+				if (!waitFor(retryFile == null || !Files.exists(retryFile), 40)) return;
+				check("Esc hat das Foto gelöscht", retryFile != null && !Files.exists(retryFile));
+				AutoTest.key(mc, Keys.code("key.keyboard.escape"));
+				check("Esc in der Kamera führt zurück zum Feed, das Handy bleibt offen",
+						ui.testView() == PhoneUi.View.FEED && ReelsHooks.phoneOpen() && !ui.isClosing());
+				check("im Feed stehen weiter " + (feedBefore + 2) + " Posts", reels.backend().feed().size() == feedBefore + 2);
+				next(15);
+				return;
+			}
+			case 62:
 				ui.testForceSlim(null);
 				// Versuch: leichter Weichzeichner hinter dem Handy (ab Werk aus).
 				ReelsHooks.testBlur(true);
 				next(15);
 				return;
-			case 35:
+			case 63:
 				AutoTest.shot(mc, "trsclient-reels-11e-quer-weichzeichner");
 				next(15);
 				return;
-			case 36:
+			case 64:
 				ReelsHooks.testBlur(false);
 				next(10);
 				return;
-			case 37: {
+			case 65: {
 				// Wegstecken mit der Handy-Taste (echte Taste H; sie gilt, weil sie seit dem Öffnen „los“ war).
 				AutoTest.key(mc, Keys.code("key.keyboard.h"));
 				check("Taste H steckt das Handy weg (Schließen läuft)", ui.isClosing() || !ReelsHooks.phoneOpen());
@@ -414,7 +665,7 @@ public final class ReelsTest {
 				next(30);
 				return;
 			}
-			case 38: {
+			case 66: {
 				check("Handy ist zu", !ReelsHooks.phoneOpen() && Mc.screen() == null);
 				check("aufgeräumt (dispose)", ui.disposed());
 				check("Handy-Taste ist wieder frei (Sperre gelöst, weil die Taste los ist)", !reels.keyGate().blocked());
@@ -422,14 +673,20 @@ public final class ReelsTest {
 				String json = feed != null && Files.isRegularFile(feed)
 						? new String(Files.readAllBytes(feed), java.nio.charset.StandardCharsets.UTF_8) : "";
 				check("feed.json ist gesichert und enthält den Kommentar (" + feed + ")", json.contains(COMMENT));
+				check("feed.json enthält beide neuen Posts", json.contains(CAPTION) && json.contains(SELFIE_CAPTION));
+				check("beide geposteten Fotos liegen noch im Foto-Ordner", photoFile != null && Files.isRegularFile(photoFile)
+						&& selfieFile != null && Files.isRegularFile(selfieFile));
+				// Die beiden Fotos neben die Bilder des Tests legen (zum Ansehen: kein HUD, kein Chat, kein Handy, keine Arme).
+				copyPhoto(mc, photoFile, "foto");
+				copyPhoto(mc, selfieFile, "selfie");
 				next(20);
 				return;
 			}
-			case 39:
+			case 67:
 				AutoTest.shot(mc, "trsclient-reels-17-nachher");
 				next(15);
 				return;
-			case 40: {
+			case 68: {
 				// Aus der Außenansicht: das Handy stellt für die Dauer auf Ich-Sicht.
 				mc.options.setCameraType(CameraType.THIRD_PERSON_BACK);
 				boolean opened = ReelsHooks.open();
@@ -439,7 +696,7 @@ public final class ReelsTest {
 				next(20);
 				return;
 			}
-			case 41: {
+			case 69: {
 				// Etwas anderes ersetzt den Bildschirm (wie Tod oder Verbindungsende): trotzdem aufräumen.
 				PhoneUi open = ui;
 				Mc.setScreen(null);
@@ -507,6 +764,44 @@ public final class ReelsTest {
 		float right = ArmRig.of(l, false).lowestEndY() - h;
 		check(String.format(Locale.ROOT, "%s: Arm-Enden %.1f / %.1f px unter dem Fensterrand (%d×%d, Verlängerung %.0f)", label,
 				left, right, w, h, ArmRig.extension(l)), left >= ArmRig.MARGIN_PX && right >= ArmRig.MARGIN_PX);
+	}
+
+	/^* Blick des Spielers: Richtung {@code yaw}, {@code pitch} Grad nach unten – ohne Übergang, der Körper dreht mit. *^/
+	private static void look(Minecraft mc, float yaw, float pitch) {
+		net.minecraft.client.player.LocalPlayer p = mc.player;
+		if (p == null) return;
+		p.setYRot(yaw);
+		p.yRotO = yaw;
+		p.setXRot(pitch);
+		p.xRotO = pitch;
+		p.yHeadRot = yaw;
+		p.yHeadRotO = yaw;
+		p.yBodyRot = yaw;
+		p.yBodyRotO = yaw;
+	}
+
+	private static boolean blockAimed(Minecraft mc) {
+		return mc.hitResult != null && mc.hitResult.getType() == net.minecraft.world.phys.HitResult.Type.BLOCK;
+	}
+
+	/^* So groß muss ein Foto dieser Haltung sein: mittiger Ausschnitt aus dem Bild des Spiels, höchstens 1280 lang. *^/
+	private static int[] photoSize(PhoneHold hold) {
+		int[] aspect = PhotoFrame.aspect(hold);
+		int[] crop = PhotoFrame.cropRect(Mc.mainRenderTarget().width, Mc.mainRenderTarget().height, aspect[0], aspect[1]);
+		return PhotoFrame.outSize(crop[2], crop[3], PhotoFrame.MAX_LONG_SIDE);
+	}
+
+	/^* Legt ein gespeichertes Foto als {@code trsclient-<Version>-reels-<name>.png} zu den Bildern des Tests. *^/
+	private static void copyPhoto(Minecraft mc, Path photo, String name) {
+		if (photo == null || !Files.isRegularFile(photo)) return;
+		try {
+			Path dir = mc.gameDirectory.toPath().resolve("screenshots");
+			Files.createDirectories(dir);
+			Files.copy(photo, dir.resolve("trsclient-" + AutoTest.MC_VERSION + "-reels-" + name + ".png"),
+					java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+		} catch (IOException | RuntimeException e) {
+			TrsClient.LOGGER.warn("[Autotest] Reels: Foto nicht kopiert", e);
+		}
 	}
 
 	private int[] spot(String name) {
