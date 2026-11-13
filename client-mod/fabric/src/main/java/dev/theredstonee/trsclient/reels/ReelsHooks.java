@@ -47,9 +47,13 @@ public final class ReelsHooks {
 	private static boolean outlineHookSeen;
 	private static boolean frameHookSeen;
 	private static boolean cameraHookSeen;
+	private static boolean effectsHookSeen;
 
-	/^* Abstand der Selfie-Kamera vor dem Gesicht (Blöcke) – etwas mehr als eine Armlänge, Kopf und Schultern im Bild. *^/
-	static final float SELFIE_DISTANCE = 1.3f;
+	/^*
+	 * Abstand der Selfie-Kamera vor dem Gesicht (Blöcke): Kopf und Oberkörper im Bild, der Kopf nimmt hochkant gut die
+	 * halbe Breite des Suchers ein – wie auf dem freigegebenen Kamera-Bild.
+	 *^/
+	static final float SELFIE_DISTANCE = 1.65f;
 	/^* Nach so vielen Nanosekunden gilt ein Auslesen als verloren (der Grafiktreiber hat nicht geantwortet). *^/
 	private static final long READBACK_LOST_NS = 3_000_000_000L;
 
@@ -175,6 +179,17 @@ public final class ReelsHooks {
 	}
 
 	/^*
+	 * Effekte „vor dem Gesicht“ (Feuer, Wasser, im Block steckend) zeichnet Minecraft nur in der Ich-Sicht. Beim Selfie
+	 * steht die Kamera vor dem Spieler – dort gehören sie nicht ins Bild.
+	 *^/
+	public static boolean faceEffects(boolean firstPerson) {
+		effectsHookSeen = true;
+		if (!firstPerson) return false;
+		PhoneUi phone = phone();
+		return phone == null || !phone.selfieActive();
+	}
+
+	/^*
 	 * Direkt bevor Minecraft die Oberfläche zeichnet: wünscht das Handy ein Bild der Welt, wird das Hauptbild jetzt
 	 * ausgelesen – ein Foto in voller Auflösung, ein Sucherbild so weit verkleinert, wie es der Sucher erlaubt
 	 * ({@link PhotoFrame#readbackFactor}). Schlägt etwas fehl, bleibt nur das Bild aus; das Spiel läuft weiter.
@@ -241,6 +256,11 @@ public final class ReelsHooks {
 	/^* Hat der Haken vor der Oberfläche schon einmal gegriffen (Bilder für die Kamera)? *^/
 	public static boolean frameHookSeen() {
 		return frameHookSeen;
+	}
+
+	/^* Hat der Haken der Effekte vor dem Gesicht schon einmal gegriffen (Selfie ohne Feuer-/Wasser-Schleier)? *^/
+	public static boolean effectsHookSeen() {
+		return effectsHookSeen;
 	}
 
 	/^* Hat der Haken der Kamera-Ausrichtung schon einmal gegriffen (Selfie)? *^/

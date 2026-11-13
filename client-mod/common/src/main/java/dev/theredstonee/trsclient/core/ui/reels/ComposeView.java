@@ -217,8 +217,14 @@ final class ComposeView {
 		int lineH = hintLine(mHint);
 		if (y + 2 * lineH > bottom) return;
 		int[] streak = ui.streakChange();
-		String first = streak[1] > streak[0] ? I18n.tr("reels.compose.streak", streak[0], streak[1])
-				: I18n.tr("reels.compose.streak.same", streak[1]);
+		// „1 Tag“ hat eine eigene Fassung – die übrigen Zahlen nehmen die Mehrzahl.
+		String first;
+		if (streak[1] > streak[0]) {
+			first = streak[1] == 1 ? I18n.tr("reels.compose.streak.one", streak[0], streak[1])
+					: I18n.tr("reels.compose.streak", streak[0], streak[1]);
+		} else {
+			first = streak[1] == 1 ? I18n.tr("reels.compose.streak.same.one", streak[1]) : I18n.tr("reels.compose.streak.same", streak[1]);
+		}
 		int cx = x + w / 2;
 		PhoneText.centered(c, first, cx, PhoneText.centerY(y, lineH, mHint), mHint, w, FeedView.AMBER_LIGHT, false);
 		PhoneText.centered(c, I18n.tr("reels.compose.local"), cx, PhoneText.centerY(y + lineH, lineH, mHint), mHint, w, HINT, false);

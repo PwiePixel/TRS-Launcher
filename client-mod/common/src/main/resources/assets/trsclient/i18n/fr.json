@@ -2755,8 +2755,11 @@
   "reels.compose.retry": "Refaire",
   "reels.compose.post": "Publier",
   "reels.compose.streak": "Série : {0} → {1} jours",
+  "reels.compose.streak.one": "Série : {0} → {1} jour",
   "reels.compose.streak.same": "Série : {0} jours",
+  "reels.compose.streak.same.one": "Série : {0} jour",
   "reels.compose.local": "Reste sur ce PC pour l'instant.",
   "reels.toast.posted": "Publié ! Série : {0} jours",
+  "reels.toast.posted.one": "Publié ! Série : {0} jour",
   "reels.toast.failed": "La photo n'a pas pu être enregistrée."
 }

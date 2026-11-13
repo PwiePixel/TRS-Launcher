@@ -2755,8 +2755,11 @@
   "reels.compose.retry": "Again",
   "reels.compose.post": "Post",
   "reels.compose.streak": "Streak: {0} → {1} days",
+  "reels.compose.streak.one": "Streak: {0} → {1} day",
   "reels.compose.streak.same": "Streak: {0} days",
+  "reels.compose.streak.same.one": "Streak: {0} day",
   "reels.compose.local": "Stays on this PC for now.",
   "reels.toast.posted": "Posted! Streak: {0} days",
+  "reels.toast.posted.one": "Posted! Streak: {0} day",
   "reels.toast.failed": "The photo could not be saved."
 }

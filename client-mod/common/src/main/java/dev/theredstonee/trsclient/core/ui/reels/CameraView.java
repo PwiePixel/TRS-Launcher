@@ -33,7 +33,8 @@ final class CameraView {
 	static final int SQUARE_LINE = 0x66FFFFFF;
 	static final int THUMB_EMPTY = 0xFF17171E;
 	/** Bänder des seitlichen Verlaufs hinter der Auslöser-Spalte (quer). */
-	static final int SIDE_BANDS = 24;
+	static final int SIDE_BANDS = 96;
+	static final float SIDE_ALPHA = 0.72f;
 
 	private final PhoneUi ui;
 	private Canvas c;
@@ -70,9 +71,9 @@ final class CameraView {
 
 		FeedView.gradient(c, sx, sy, sw, Math.min(sh, p(land ? 96 : 140)), 0.867f, 0.533f, 0.55f, 0f);
 		if (land) {
-			sideGradient();
 			int gh = Math.min(sh, p(96));
-			FeedView.gradient(c, sx, sy + sh - gh, sw - Math.min(sw, p(150)), gh, 0f, 0.35f, 0.5f, 0.7f);
+			FeedView.gradient(c, sx, sy + sh - gh, sw, gh, 0f, 0.3f, 0.5f, 0.62f);
+			sideGradient();
 		} else {
 			int gh = Math.min(sh, p(230));
 			FeedView.gradient(c, sx, sy + sh - gh, sw, gh, 0f, 0.867f, 0.38f, 1f);
@@ -106,15 +107,17 @@ final class CameraView {
 
 	/** Quer: der Bildschirm wird nach rechts hin dunkler, damit die Auslöser-Spalte auf jedem Bild zu sehen ist. */
 	private void sideGradient() {
-		int w = Math.min(sw, p(210));
+		int w = Math.min(sw, p(230));
 		if (w <= 0) return;
+		// Viele schmale Bänder (je Band höchstens zwei Stufen Deckkraft) – auf hellem Himmel sind sonst Streifen zu sehen.
 		int bands = Math.min(SIDE_BANDS, w);
 		int x0 = sx + sw - w;
 		for (int i = 0; i < bands; i++) {
 			int x1 = x0 + i * w / bands;
 			int x2 = x0 + (i + 1) * w / bands;
 			float t = (i + 0.5f) / bands;
-			int alpha = Math.max(0, Math.min(255, Math.round(t * 0.8f * 255f)));
+			// Sanfter Anfang: links kaum etwas, zum Rand hin deutlich.
+			int alpha = Math.max(0, Math.min(255, Math.round(t * t * (3f - 2f * t) * SIDE_ALPHA * 255f)));
 			if (alpha > 0 && x2 > x1) c.fill(x1, sy, x2, sy + sh, alpha << 24);
 		}
 	}

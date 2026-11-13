@@ -2755,8 +2755,11 @@
   "reels.compose.retry": "Tekrar",
   "reels.compose.post": "Paylaş",
   "reels.compose.streak": "Seri: {0} → {1} gün",
+  "reels.compose.streak.one": "Seri: {0} → {1} gün",
   "reels.compose.streak.same": "Seri: {0} gün",
+  "reels.compose.streak.same.one": "Seri: {0} gün",
   "reels.compose.local": "Şimdilik bu bilgisayarda kalır.",
   "reels.toast.posted": "Paylaşıldı! Seri: {0} gün",
+  "reels.toast.posted.one": "Paylaşıldı! Seri: {0} gün",
   "reels.toast.failed": "Fotoğraf kaydedilemedi."
 }

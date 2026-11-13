@@ -4,7 +4,8 @@ package dev.theredstonee.trsclient.mixin;
 // solange das Handy draußen ist, zeichnet Minecraft weder die normale Spielerhand (die gezeichneten Arme ersetzen
 // sie) noch den Umriss des anvisierten Blocks (er läge hinter dem Handy und auf den Fotos). Dazu der Punkt, an dem die
 // Kamera des Handys ihr Bild holt: direkt bevor die Oberfläche gezeichnet wird – die Welt ist fertig (samt
-// Leucht-Umrissen und Effekten), HUD, Chat, Handy und Arme fehlen noch.
+// Leucht-Umrissen und Effekten), HUD, Chat, Handy und Arme fehlen noch. Und beim Selfie keine Effekte „vor dem Gesicht“
+// (Feuer, Wasser, im Block): die Perspektive bleibt die Ich-Sicht, die Kamera steht aber vor dem Spieler.
 // „require = 0“: greift ein Haken wegen einer anderen Mod nicht, startet das Spiel trotzdem – der Selbsttest meldet es.
 //? if >=26.2 && <26.3 {
 /*import dev.theredstonee.trsclient.reels.ReelsHooks;
@@ -12,6 +13,7 @@ import net.minecraft.client.renderer.GameRenderer;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.ModifyArg;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
@@ -32,6 +34,13 @@ public abstract class ReelsRenderMixin {
 			at = @At(value = "INVOKE", target = "Lnet/minecraft/client/gui/render/GuiRenderer;render()V"))
 	private void trsclient$reelsFrame(CallbackInfo ci) {
 		ReelsHooks.beforeGui();
+	}
+
+	@ModifyArg(method = "renderLevel(Lnet/minecraft/client/DeltaTracker;)V", index = 0, require = 0,
+			at = @At(value = "INVOKE",
+					target = "Lnet/minecraft/client/renderer/ScreenEffectRenderer;submit(ZZFLnet/minecraft/client/renderer/SubmitNodeCollector;Z)V"))
+	private boolean trsclient$reelsNoFaceEffects(boolean firstPerson) {
+		return ReelsHooks.faceEffects(firstPerson);
 	}
 }
 *///?}

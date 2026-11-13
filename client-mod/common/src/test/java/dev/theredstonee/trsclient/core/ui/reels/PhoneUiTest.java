@@ -1876,12 +1876,31 @@ class PhoneUiTest {
 		PhoneUi ui = camera(PhoneHold.PORTRAIT);
 		assertEquals(0, backend.streak(NOON));
 		shoot(ui);
-		assertTrue(frame(ui).shows(I18n.tr("reels.compose.streak", 0, 1)));
+		// Ein Tag ist „1 day“, nicht „1 days“ – in jeder Sprache mit eigener Fassung.
+		assertEquals("Streak: 0 → 1 day", I18n.tr("reels.compose.streak.one", 0, 1));
+		assertTrue(frame(ui).shows(I18n.tr("reels.compose.streak.one", 0, 1)));
 		click(ui, "composePost");
 		assertEquals(1, backend.feed().size());
 		assertEquals(1, backend.streak(NOON));
 		assertEquals("", backend.feed().get(0).caption, "ohne Text geht auch");
-		assertEquals(I18n.tr("reels.toast.posted", 1), ui.testToast());
+		assertEquals(I18n.tr("reels.toast.posted.one", 1), ui.testToast());
+		assertEquals("Posted! Streak: 1 day", ui.testToast());
+		// Am selben Tag noch ein Foto: die Streak bleibt bei einem Tag.
+		frame(ui);
+		click(ui, "camera");
+		frame(ui);
+		shoot(ui);
+		assertTrue(frame(ui).shows(I18n.tr("reels.compose.streak.same.one", 1)), "„Streak: 1 day“");
+		// Die Meldung steht unter Kopfzeile und Titel, nicht darauf.
+		ui.keyPressed(0, UiKey.ENTER, false);
+		RecCanvas c = frame(ui);
+		int[] toast = ui.testSpot("toast");
+		int[] streak = ui.testSpot("streak");
+		assertNotNull(toast);
+		assertTrue(toast[1] >= streak[1] + streak[3], "Meldung unter der Kopfzeile");
+		for (RecCanvas.Text t : c.texts) {
+			if (t.text.equals(I18n.tr("reels.tab"))) assertTrue(t.y + t.h <= toast[1], "Meldung unter dem Titel „Reels“");
+		}
 		ui.dispose();
 	}
 

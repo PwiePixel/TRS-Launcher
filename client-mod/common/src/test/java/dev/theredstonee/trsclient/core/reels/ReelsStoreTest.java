@@ -399,6 +399,39 @@ class ReelsStoreTest {
 		assertEquals(1, PhotoFrame.readbackFactor(0, 0, 16, 9, 10, 10));
 	}
 
+	@Test
+	void viewfinderTextureIsAsLargeAsTheViewfinderButNeverLargerThanItsSource() {
+		// Ausschnitt größer als der Sucher: genau die Größe des Suchers.
+		assertArrayEquals(new int[]{384, 806}, PhotoFrame.viewSize(515, 1080, 384, 806));
+		assertArrayEquals(new int[]{1048, 509}, PhotoFrame.viewSize(1920, 932, 1048, 509));
+		// Ausschnitt kleiner (kleines Fenster, verkleinert ausgelesen): so groß wie der Ausschnitt – nie vergrößern.
+		assertArrayEquals(new int[]{480, 233}, PhotoFrame.viewSize(480, 233, 1048, 509));
+		assertArrayEquals(new int[]{129, 270}, PhotoFrame.viewSize(129, 270, 384, 806));
+		// Riesiger Sucher: höchstens MAX_VIEW_SIDE an der langen Seite, Seitenverhältnis bleibt.
+		int[] big = PhotoFrame.viewSize(4192, 2036, 4192, 2036);
+		assertEquals(PhotoFrame.MAX_VIEW_SIDE, big[0]);
+		assertEquals(Math.round(2036 * (PhotoFrame.MAX_VIEW_SIDE / 4192.0)), big[1]);
+		// Unsinnige Angaben werfen nicht.
+		assertArrayEquals(new int[]{1, 1}, PhotoFrame.viewSize(0, 0, 0, 0));
+		assertArrayEquals(new int[]{100, 50}, PhotoFrame.viewSize(100, 50, 0, 0));
+	}
+
+	@Test
+	void streakAfterAPostCountsTodayOnceAndChangesNothing() {
+		LocalReelsBackend b = new LocalReelsBackend(tmp, UTC);
+		assertEquals(0, b.streak(NOON));
+		assertEquals(1, b.streakAfterPost(NOON), "der erste Post überhaupt startet die Streak");
+		assertEquals(0, b.streak(NOON), "die Frage allein ändert nichts");
+		assertNotNull(b.post(ReelsPost.newId(NOON - DAY, UTC, 1) + ".png", 16, 9, false, false, "gestern", "A", NOON - DAY));
+		assertEquals(1, b.streak(NOON), "gestern gepostet: die Streak läuft noch");
+		assertEquals(2, b.streakAfterPost(NOON), "ein Post heute verlängert sie");
+		assertNotNull(b.post(ReelsPost.newId(NOON, UTC, 2) + ".png", 16, 9, false, false, "heute", "A", NOON));
+		assertEquals(2, b.streak(NOON));
+		assertEquals(2, b.streakAfterPost(NOON), "ein zweiter Post am selben Tag ändert nichts");
+		assertEquals(1, b.streakAfterPost(NOON + 3 * DAY), "nach einer Lücke beginnt sie wieder bei eins");
+		assertEquals(2, b.feed().size());
+	}
+
 	// --- Dienst: Foto speichern, posten, verwerfen ---
 
 	private static int[] testFrame(int w, int h) {

@@ -736,7 +736,8 @@ public final class PhoneUi extends UiScreen {
 		pager.first();
 		// Die Streak sofort neu rechnen.
 		streakSecond = Long.MIN_VALUE;
-		toast(I18n.tr("reels.toast.posted", streak()));
+		int days = streak();
+		toast(days == 1 ? I18n.tr("reels.toast.posted.one", days) : I18n.tr("reels.toast.posted", days));
 		host.click();
 	}
 
@@ -767,7 +768,8 @@ public final class PhoneUi extends UiScreen {
 		int w = textW + 2 * pad;
 		int h = (lines.size() - 1) * lineH + PhoneText.height(m) + 2 * pad;
 		int x = l.screenX + (l.screenW - w) / 2;
-		int y = l.screenY + Math.round(44 * l.q);
+		// Unter Kopfzeile und Titel, damit beides lesbar bleibt.
+		int y = l.screenY + Math.round((l.hold == PhoneHold.PORTRAIT ? 96 : 58) * l.q);
 		if (y + h > l.screenY + l.screenH) y = l.screenY + Math.max(0, (l.screenH - h) / 2);
 		if (w > l.screenW || h > l.screenH) return;
 		c.fill(x, y, x + w, y + h, 0xF2111116);
