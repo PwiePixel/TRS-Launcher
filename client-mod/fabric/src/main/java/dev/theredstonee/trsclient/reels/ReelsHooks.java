@@ -49,7 +49,9 @@ import java.util.concurrent.ConcurrentLinkedQueue;
  * <p><b>Perspektive:</b> das Handy gibt es nur aus der Ich-Sicht. Eine Außenansicht, die der Spieler selbst gewählt hat
  * (F5), kommt nach dem Wegstecken zurück. Eine, die gerade eine TRS-Funktion hält (Emote-Kamera, Freelook), merkt sich
  * das Handy nicht – die Funktion stellt selbst zurück, und das Handy würde sonst nach deren Ende eine veraltete
- * Außenansicht wiederherstellen. Während einer Kamera-Fahrt oder der freien Kamera bleibt das Handy in der Tasche.
+ * Außenansicht wiederherstellen. Ein laufender Freelook endet beim Herausholen (im Umschalt-Modus liefe er sonst unter
+ * dem Handy weiter: die Kamera des Handys ließe sich nicht drehen, das Selfie zeigte nicht aufs Gesicht). Während einer
+ * Kamera-Fahrt oder der freien Kamera bleibt das Handy in der Tasche.
  *
  * <p>Alles hier läuft im Render-/Spiel-Thread – bis auf die Rückgabe der ausgelesenen Pixel, deren Thread nicht
  * festgelegt ist (deshalb die Warteschlange).
@@ -136,6 +138,9 @@ public final class ReelsHooks {
 			dropFrames();
 			PhoneUi phone = new PhoneUi(reels, new Host());
 			viewBefore = null;
+			// Ein laufender Freelook endet hier und stellt seine Perspektive von davor zurück – erst danach ist zu sehen,
+			// welche Ansicht dem Spieler gehört.
+			endFreelook();
 			// Die Arme sind die eigenen: aus der Außenansicht geht es für die Dauer in die Ich-Sicht.
 			keepFirstPerson();
 			Mc.setScreen(new ReelsScreen(phone));
@@ -154,6 +159,20 @@ public final class ReelsHooks {
 			return c != null && c.overridden();
 		} catch (RuntimeException | LinkageError e) {
 			return false;
+		}
+	}
+
+	/^*
+	 * Freelook beenden, bevor das Handy herauskommt. Im Umschalt-Modus bliebe er sonst unter dem Handy an: die Kamera des
+	 * Spiels folgte weiter dem Freelook-Blick statt dem Spieler (Ziehen und Pfeiltasten im Sucher drehten nichts, das
+	 * Selfie stünde neben dem Gesicht), und nach dem Wegstecken liefe er in der Ich-Sicht weiter.
+	 *^/
+	private static void endFreelook() {
+		try {
+			TrsClient client = TrsClient.get();
+			if (client != null) client.pvp().endFreelook();
+		} catch (RuntimeException | LinkageError e) {
+			TrsClient.LOGGER.warn("MC-Reels: Freelook nicht beendet", e);
 		}
 	}
 

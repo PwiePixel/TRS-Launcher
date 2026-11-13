@@ -275,6 +275,18 @@ public final class PvpFeatures {
 		//?}
 	}
 
+	/**
+	 * Freelook sofort beenden und die Perspektive von davor zurückstellen – wie beim Loslassen bzw. Ausschalten. Für
+	 * Funktionen, die Blick und Perspektive selbst brauchen (MC-Reels: das Handy). Im Umschalt-Modus bleibt Freelook
+	 * danach aus, bis die Taste wieder gedrückt wird.
+	 */
+	public void endFreelook() {
+		if (!freelook.active()) return;
+		freelook.stop();
+		if (cameraBeforeFreelook >= 0) Mc.setCameraMode(cameraBeforeFreelook);
+		cameraBeforeFreelook = -1;
+	}
+
 	/** Selbsttest: Freelook erzwingen (Kamera um {@code yawOffset} gedreht) bzw. mit NaN beenden. */
 	public void forceFreelook(float yawOffset) {
 		forcedFreelookYaw = yawOffset;
