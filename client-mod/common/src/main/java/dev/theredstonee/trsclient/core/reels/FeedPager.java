@@ -58,9 +58,14 @@ public final class FeedPager {
 		return changed;
 	}
 
-	/** Zurück zum neuesten Post (nach dem Posten). */
+	/** Zurück zum neuesten Post. */
 	public void first() {
-		index = 0;
+		to(0);
+	}
+
+	/** Zu einer bestimmten Seite (nach dem Posten: zum neuen Post); außerhalb des Feeds zur nächstgelegenen. */
+	public void to(int page) {
+		index = Math.max(0, Math.min(Math.max(0, size - 1), page));
 		wheel = 0;
 	}
 }

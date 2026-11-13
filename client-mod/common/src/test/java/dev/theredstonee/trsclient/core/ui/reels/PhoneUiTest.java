@@ -1990,6 +1990,35 @@ class PhoneUiTest {
 	}
 
 	@Test
+	void afterPostingTheFeedShowsTheNewPostEvenWhenOlderPostsCarryALaterTime() {
+		// Die Uhr des PCs wurde zurückgestellt: zwei Posts tragen eine Zeit, die jetzt in der Zukunft liegt. Der Feed ist
+		// nach der Zeit sortiert, der neue Post steht deshalb hinter ihnen.
+		post("Von morgen", host.name, -24, false);
+		post("Von übermorgen", host.name, -48, false);
+		PhoneUi ui = camera(PhoneHold.PORTRAIT);
+		shoot(ui);
+		for (char ch : "Jetzt".toCharArray()) ui.inputChar(ch);
+		armPost(ui);
+		ui.keyPressed(0, UiKey.ENTER, false);
+		assertEquals(3, backend.feed().size());
+		assertEquals("Jetzt", backend.feed().get(2).caption);
+		assertEquals(PhoneUi.View.FEED, ui.testView());
+		assertEquals(2, ui.testPage(), "der Feed zeigt trotzdem den neuen Post, nicht Seite 1");
+		frame(ui);
+		frame(ui);
+		RecCanvas c = frame(ui);
+		assertTrue(c.shows("Jetzt"), c.strings().toString());
+		assertFalse(c.shows("Von übermorgen"));
+		String photo = photoTexture(c);
+		// Auch das kleine Bild neben dem Auslöser ist das eben gepostete Foto.
+		click(ui, "camera");
+		frame(ui);
+		c = frame(ui);
+		assertEquals(photo, photoTexture(c));
+		ui.dispose();
+	}
+
+	@Test
 	void puttingThePhoneAwayOnSelfieTurnsTheGameCameraBackAtOnce() {
 		PhoneUi ui = camera(PhoneHold.PORTRAIT);
 		click(ui, "camSelfie");

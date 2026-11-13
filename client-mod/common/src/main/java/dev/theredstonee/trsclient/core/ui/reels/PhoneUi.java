@@ -222,6 +222,8 @@ public final class PhoneUi extends UiScreen {
 	/** Das aufgenommene, noch nicht gepostete Foto („Neuer Post“). */
 	private Reels.Shot shot;
 	private TextureRef previewTexture;
+	/** Der Post, der mit diesem Handy zuletzt gepostet wurde (für das kleine Bild in der Kamera), oder null. */
+	private String lastPosted;
 	/** Wann „Neuer Post“ aufging, und ob Enter seitdem einmal losgelassen war. */
 	private long composeSince;
 	private boolean composeEnterUp;
@@ -585,10 +587,21 @@ public final class PhoneUi extends UiScreen {
 		return finderTexture;
 	}
 
-	/** Foto des neuesten Posts (kleines Bild neben dem Auslöser) oder null. */
+	/**
+	 * Das letzte Foto (kleines Bild neben dem Auslöser) oder null: der Post, der mit diesem Handy zuletzt gepostet
+	 * wurde, sonst der neueste im Feed.
+	 */
 	TextureRef lastPhoto() {
 		if (disposed || feed == null || feed.isEmpty()) return null;
-		return load(feed.get(0));
+		int i = indexOf(lastPosted);
+		return load(feed.get(i < 0 ? 0 : i));
+	}
+
+	/** Seite des Posts mit dieser ID im Feed oder -1. */
+	private int indexOf(String id) {
+		if (id == null || feed == null) return -1;
+		for (int i = 0; i < feed.size(); i++) if (id.equals(feed.get(i).id)) return i;
+		return -1;
 	}
 
 	/** Fläche des Suchers, auf der Ziehen den Blick dreht (unter allen Knöpfen). */
@@ -781,7 +794,10 @@ public final class PhoneUi extends UiScreen {
 		return view == View.COMPOSE && ticker() - composeSince >= POST_GUARD_MS;
 	}
 
-	/** „Posten“: das Foto steht danach vorn im Feed. */
+	/**
+	 * „Posten“: der Feed zeigt danach den neuen Post. Das ist die erste Seite – außer die Uhr des PCs wurde
+	 * zurückgestellt: dann stehen ältere Posts mit späterer Zeit davor, und der neue ist ein paar Seiten weiter.
+	 */
 	void postShot() {
 		if (view != View.COMPOSE || shot == null || !postArmed()) return;
 		ReelsPost posted = reels.post(shot, captionInput.text(), host.playerName(), now());
@@ -795,7 +811,8 @@ public final class PhoneUi extends UiScreen {
 		captionInput.setFocused(false);
 		view = View.FEED;
 		refreshFeed();
-		pager.first();
+		lastPosted = posted.id;
+		pager.to(Math.max(0, indexOf(posted.id)));
 		// Die Streak sofort neu rechnen.
 		streakSecond = Long.MIN_VALUE;
 		int days = streak();

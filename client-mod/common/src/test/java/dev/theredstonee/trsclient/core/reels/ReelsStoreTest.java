@@ -394,6 +394,17 @@ class ReelsStoreTest {
 		p.first();
 		assertEquals(0, p.index());
 		assertFalse(p.wheel(Double.NaN));
+		// Direkt zu einer Seite (nach dem Posten zum neuen Post), außerhalb des Feeds zur nächstgelegenen.
+		p.to(2);
+		assertEquals(2, p.index());
+		p.to(9);
+		assertEquals(3, p.index());
+		p.to(-4);
+		assertEquals(0, p.index());
+		p.wheel(-0.5);
+		p.to(1);
+		assertFalse(p.wheel(-0.5), "angesparte halbe Rasten verfallen dabei");
+		assertEquals(1, p.index());
 	}
 
 	// --- Foto ---
