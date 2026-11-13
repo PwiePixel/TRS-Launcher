@@ -1,5 +1,7 @@
 package dev.theredstonee.trsclient.core.module;
 
+import dev.theredstonee.trsclient.core.reels.FeedFilter;
+import dev.theredstonee.trsclient.core.reels.FeedSort;
 import dev.theredstonee.trsclient.core.reels.PhoneHold;
 
 /**
@@ -34,6 +36,10 @@ public final class ReelsModules {
 	public final KeySetting rotateKey;
 	/** Zuletzt gewählte Haltung. */
 	public final ChoiceSetting<PhoneHold> hold;
+	/** Zuletzt gewählter Filter des Feeds (alle / Freunde / ich). */
+	public final ChoiceSetting<FeedFilter> feedFilter;
+	/** Zuletzt gewählte Reihenfolge des Feeds (neu / beliebt). */
+	public final ChoiceSetting<FeedSort> feedSort;
 
 	ReelsModules(ModuleRegistry registry) {
 		reels = registry.register(new Module("mcReels", "MC-Reels",
@@ -42,6 +48,8 @@ public final class ReelsModules {
 		openKey = reels.add(new KeySetting("key", "Open phone", "key.keyboard.k"));
 		rotateKey = reels.add(new KeySetting("rotateKey", "Rotate phone", "key.keyboard.r"));
 		hold = reels.add(new ChoiceSetting<PhoneHold>("hold", "Hold", PhoneHold.class, PhoneHold.LANDSCAPE));
+		feedFilter = reels.add(new ChoiceSetting<FeedFilter>("feedFilter", "Feed shows", FeedFilter.class, FeedFilter.ALL));
+		feedSort = reels.add(new ChoiceSetting<FeedSort>("feedSort", "Feed order", FeedSort.class, FeedSort.NEWEST));
 		reels.icon("camera").category(Category.MISC).availableWhen(new java.util.concurrent.Callable<Boolean>() {
 			@Override
 			public Boolean call() {

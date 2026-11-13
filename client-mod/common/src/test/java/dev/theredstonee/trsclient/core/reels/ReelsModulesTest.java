@@ -68,6 +68,40 @@ class ReelsModulesTest {
 	}
 
 	@Test
+	void filterAndSortAreRememberedSettingsWithDefaultsAllAndNewest() {
+		TrsModules m = new TrsModules();
+		assertSame(FeedFilter.ALL, m.reels.feedFilter.get());
+		assertSame(FeedSort.NEWEST, m.reels.feedSort.get());
+		assertEquals("feedFilter", m.reels.feedFilter.key());
+		assertEquals("feedSort", m.reels.feedSort.key());
+		assertEquals(3, m.reels.feedFilter.size());
+		assertEquals(2, m.reels.feedSort.size());
+		// Dieselben Schlüssel nutzen die Marke im Kopf des Feeds und das Blatt „Feed“.
+		assertEquals("setting.mcReels.feedFilter.all", m.reels.feedFilter.optionKey(0));
+		assertEquals("setting.mcReels.feedFilter.friends", m.reels.feedFilter.optionKey(1));
+		assertEquals("setting.mcReels.feedFilter.mine", m.reels.feedFilter.optionKey(2));
+		assertEquals("setting.mcReels.feedSort.newest", m.reels.feedSort.optionKey(0));
+		assertEquals("setting.mcReels.feedSort.popular", m.reels.feedSort.optionKey(1));
+
+		m.reels.feedFilter.set(FeedFilter.MINE);
+		m.reels.feedSort.set(FeedSort.POPULAR);
+		TrsConfig saved = m.registry.capture();
+		TrsModules again = new TrsModules();
+		again.registry.apply(saved);
+		assertSame(FeedFilter.MINE, again.reels.feedFilter.get());
+		assertSame(FeedSort.POPULAR, again.reels.feedSort.get());
+		assertSame(PhoneHold.LANDSCAPE, again.reels.hold.get(), "die Haltung bleibt davon unberührt");
+
+		again.reels.feedFilter.set(FeedFilter.FRIENDS);
+		TrsModules third = new TrsModules();
+		third.registry.apply(again.registry.capture());
+		assertSame(FeedFilter.FRIENDS, third.reels.feedFilter.get());
+		assertEquals("Friends", FeedFilter.FRIENDS.label());
+		assertEquals("Me", FeedFilter.MINE.label());
+		assertEquals("Popular", FeedSort.POPULAR.label());
+	}
+
+	@Test
 	void holdTogglesBetweenTheTwo() {
 		assertSame(PhoneHold.PORTRAIT, PhoneHold.LANDSCAPE.other());
 		assertSame(PhoneHold.LANDSCAPE, PhoneHold.PORTRAIT.other());
