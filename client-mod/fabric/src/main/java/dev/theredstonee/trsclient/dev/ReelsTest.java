@@ -36,7 +36,7 @@ import java.util.TimeZone;
 /^*
  * Selbsttest „MC-Reels“ ({@code -PtrsAutotestOnly=reels}, eigener Feed-Ordner über
  * {@code -PtrsSys.trsclient.reels.dir=trs-reels-autotest}): Welt mit festem Startwert, Handy quer und hochkant, bei
- * GUI-Skalierung 1/2/4 und in vier Fenstergrößen, Feed blättern, Like per echtem Klick, Kommentar, Drehen und
+ * GUI-Skalierung 1/2/4 und in mehreren Fenstergrößen (auch hoch), Feed blättern, Like per echtem Klick, Kommentar, Drehen und
  * Wegstecken per echter Taste. Jede Prüfung schreibt {@code [Autotest] Reels: OK …} oder {@code FEHLER …} ins Log;
  * die Bilder liegen als {@code screenshots/trsclient-<Version>-reels-*.png} daneben und gehören angesehen (Arme,
  * Hand weg, Minimap weg, Schnellleiste da).
@@ -48,8 +48,14 @@ public final class ReelsTest {
 	private static final String WORLD = "trs-reels-" + AutoTest.MC_VERSION;
 	private static final int[] SCALES = {1, 2, 4};
 	private static final String[] SCALE_SHOTS = {"03-quer-gui1", "04-quer-gui2", "05-quer-gui4"};
-	private static final int[][] WINDOWS = {{1280, 720}, {854, 480}, {1024, 768}};
-	private static final String[] WINDOW_SHOTS = {"06-quer-1280", "07-quer-854", "08-quer-1024"};
+	/^* Fenstergrößen: 16:9 klein, sehr klein, 4:3 und ein hohes Fenster (dort werden die Arme verlängert). *^/
+	private static final int[][] WINDOWS = {{1280, 720}, {854, 480}, {1024, 768}, {800, 1000}};
+	private static final String[] WINDOW_SHOTS = {"06-quer-1280", "07-quer-854", "08-quer-1024", "08b-quer-800x1000"};
+	private static final int[][] PORTRAIT_WINDOWS = {{1024, 768}, {854, 480}, {800, 1000}};
+	private static final String[] PORTRAIT_WINDOW_SHOTS = {"10b-hochkant-1024", "10c-hochkant-854", "10d-hochkant-800x1000"};
+	/^* Feste Szene in der Testwelt (x, z) und Blickrichtung: eine Ebene an einem Fluss. *^/
+	private static final int[] SCENE = {373, 276};
+	private static final float SCENE_YAW = -60f;
 	private static final String COMMENT = "Sieht super aus!";
 	/^* Nach so vielen Ticks bricht der Test ab, statt Gradle hängen zu lassen. *^/
 	private static final int WATCHDOG_TICKS = 9000;
@@ -145,10 +151,11 @@ public final class ReelsTest {
 				next(60);
 				return;
 			case 2: {
-				// Feste Szene: Mittag, klar, fester Blick. Ohne Rückmeldung im Chat.
+				// Feste Szene: Mittag, klar, fester Blick – in einer grünen Gegend (der Startpunkt dieser Welt liegt im
+				// Schnee; Weißes direkt neben den Händen soll auf den Vergleichsbildern nicht sein). Ohne Rückmeldung im Chat.
 				silent(mc, "time set noon");
 				silent(mc, "weather clear");
-				silent(mc, "execute as @p at @s run tp @s ~ ~ ~ 20 6");
+				greenScene(mc);
 				modules.reels.reels.setEnabled(true);
 				modules.reels.hold.set(PhoneHold.LANDSCAPE);
 				modules.minimap.setEnabled(true);
@@ -157,17 +164,21 @@ public final class ReelsTest {
 				// Die Vorschau nach einem Bildschirmfoto läge sonst auf den nächsten Bildern.
 				modules.comfort.shotToast.set(false);
 				mc.options.setCameraType(CameraType.FIRST_PERSON);
-				ChatLines.addMessage(Mc.text("MC-Reels-Selbsttest: Diese Chat-Zeile darf später auf keinem Foto sein."));
-				next(60);
+				// Die neue Gegend muss erst geladen und gezeichnet sein.
+				next(240);
 				return;
 			}
 			case 3:
+				ChatLines.addMessage(Mc.text("MC-Reels-Selbsttest: Diese Chat-Zeile darf später auf keinem Foto sein."));
+				next(20);
+				return;
+			case 4:
 				TrsClient.LOGGER.info("[Autotest] Reels: Fenster {}×{}, GUI-Skalierung {}", Mc.window().getWidth(),
 						Mc.window().getHeight(), Mc.window().getGuiScale());
 				AutoTest.shot(mc, "trsclient-reels-01-vorher");
 				next(15);
 				return;
-			case 4: {
+			case 5: {
 				boolean opened = ReelsHooks.open();
 				ui = ReelsHooks.phone();
 				check("Handy geht auf (ReelsHooks.open)", opened && ui != null);
@@ -178,7 +189,7 @@ public final class ReelsTest {
 				next(30);
 				return;
 			}
-			case 5: {
+			case 6: {
 				check("Handy ist offen", ReelsHooks.phoneOpen());
 				check("Haken für die Spielerhand greift (renderItemInHand)", ReelsHooks.handHookSeen());
 				check("Haken für den Block-Umriss greift (shouldRenderBlockOutline)", ReelsHooks.outlineHookSeen());
@@ -193,12 +204,12 @@ public final class ReelsTest {
 				next(15);
 				return;
 			}
-			case 6:
+			case 7:
 				seed(reels, mc.getUser().getName());
 				check("drei Test-Posts im Feed", reels.backend().feed().size() == 3);
 				next(40);
 				return;
-			case 7: {
+			case 8: {
 				// GUI-Skalierung 1, 2, 4: das Handy muss jedes Mal an derselben Stelle gleich groß sein.
 				if (!applied) {
 					guiScale(mc, SCALES[index]);
@@ -221,7 +232,7 @@ public final class ReelsTest {
 				}
 				return;
 			}
-			case 8: {
+			case 9: {
 				boolean same = phoneAtScale[0] != null;
 				for (int[] r : phoneAtScale) same &= Arrays.equals(r, phoneAtScale[0]);
 				check("Handy bei GUI 1, 2 und 4 gleich groß an derselben Stelle (" + Arrays.toString(phoneAtScale[0]) + ")", same);
@@ -229,35 +240,15 @@ public final class ReelsTest {
 				next(25);
 				return;
 			}
-			case 9: {
-				// Andere Fenstergrößen (16:9 klein, sehr klein, 4:3): die Arme laufen immer unten aus dem Bild.
-				int[] size = WINDOWS[index];
-				if (!applied) {
-					windowSize(size[0], size[1]);
-					applied = true;
-					wait = 40;
-					return;
-				}
-				applied = false;
-				int w = Mc.window().getWidth(), h = Mc.window().getHeight();
-				check("Fenster ist " + size[0] + "×" + size[1] + " (ist " + w + "×" + h + ")", w == size[0] && h == size[1]);
-				int[] phone = ui.testSpot("phone");
-				check("Handy liegt ganz im Fenster " + w + "×" + h + " (" + Arrays.toString(phone) + ")",
-						phone != null && phone[0] >= 0 && phone[1] >= 0 && phone[0] + phone[2] <= w && phone[1] + phone[3] <= h);
-				armCheck("quer, Fenster " + w + "×" + h);
-				AutoTest.shot(mc, "trsclient-reels-" + WINDOW_SHOTS[index]);
-				wait = 15;
-				if (++index == WINDOWS.length) {
-					index = 0;
-					phase++;
-				}
-				return;
-			}
 			case 10:
+				// Andere Fenstergrößen: die Arme laufen immer unten aus dem Bild.
+				if (windows(mc, WINDOWS, WINDOW_SHOTS, "quer")) phase++;
+				return;
+			case 11:
 				windowSize(1920, 1080);
 				next(40);
 				return;
-			case 11: {
+			case 12: {
 				check("Fenster wieder 1920×1080", Mc.window().getWidth() == 1920 && Mc.window().getHeight() == 1080);
 				// Mausrad nach unten über dem Foto: nächster Post (über den Bildschirm der Version, wie ein echtes Rad).
 				int[] photo = spot("screen");
@@ -267,14 +258,14 @@ public final class ReelsTest {
 				next(15);
 				return;
 			}
-			case 12: {
+			case 13: {
 				List<ReelsPost> feed = reels.backend().feed();
 				likedPost = feed.size() > 1 ? feed.get(1).id : null;
 				clickSpot(mc, "heart");
 				next(10);
 				return;
 			}
-			case 13: {
+			case 14: {
 				ReelsPost post = byId(reels, likedPost);
 				boolean liked = post != null && post.likedByMe && post.likes == 1;
 				check("echter Klick auf das Herz: Post ist geliked", liked);
@@ -287,12 +278,12 @@ public final class ReelsTest {
 				next(10);
 				return;
 			}
-			case 14:
+			case 15:
 				// Zweiter Post ist hochkant fotografiert: im Querformat ganz zu sehen (nicht beschnitten).
 				AutoTest.shot(mc, "trsclient-reels-09-quer-feed");
 				next(15);
 				return;
-			case 15: {
+			case 16: {
 				// Enter öffnet die Kommentare (echte Taste), tippen geht nur über die Oberfläche.
 				AutoTest.key(mc, Keys.code("key.keyboard.enter"));
 				check("Enter öffnet die Kommentare", ui.testView() == PhoneUi.View.COMMENTS);
@@ -300,11 +291,11 @@ public final class ReelsTest {
 				next(10);
 				return;
 			}
-			case 16:
+			case 17:
 				AutoTest.shot(mc, "trsclient-reels-09b-quer-kommentar-tippen");
 				next(15);
 				return;
-			case 17: {
+			case 18: {
 				AutoTest.key(mc, Keys.code("key.keyboard.enter"));
 				ReelsPost post = byId(reels, likedPost);
 				check("Enter sendet den Kommentar (1 Kommentar am Post)", post != null && post.comments.size() == 1
@@ -312,18 +303,18 @@ public final class ReelsTest {
 				next(10);
 				return;
 			}
-			case 18:
+			case 19:
 				AutoTest.shot(mc, "trsclient-reels-09c-quer-kommentare");
 				next(15);
 				return;
-			case 19: {
+			case 20: {
 				AutoTest.key(mc, Keys.code("key.keyboard.escape"));
 				check("Esc schließt nur die Kommentare, das Handy bleibt offen",
 						ui.testView() == PhoneUi.View.FEED && ReelsHooks.phoneOpen() && !ui.isClosing());
 				next(10);
 				return;
 			}
-			case 20: {
+			case 21: {
 				// Handy drehen: echte Taste R (Standard).
 				AutoTest.key(mc, Keys.code("key.keyboard.r"));
 				boolean rotated = ui.testHold() == PhoneHold.PORTRAIT;
@@ -333,7 +324,7 @@ public final class ReelsTest {
 				next(30);
 				return;
 			}
-			case 21: {
+			case 22: {
 				armCheck("hochkant");
 				int[] phone = ui.testSpot("phone");
 				int w = Mc.window().getWidth(), h = Mc.window().getHeight();
@@ -345,23 +336,23 @@ public final class ReelsTest {
 				next(15);
 				return;
 			}
-			case 22:
+			case 23:
 				ui.testForceSlim(Boolean.TRUE);
 				next(10);
 				return;
-			case 23:
+			case 24:
 				AutoTest.shot(mc, "trsclient-reels-11-hochkant-slim");
 				next(15);
 				return;
-			case 24:
+			case 25:
 				ui.testForceSlim(Boolean.FALSE);
 				next(10);
 				return;
-			case 25:
+			case 26:
 				AutoTest.shot(mc, "trsclient-reels-11b-hochkant-breit");
 				next(15);
 				return;
-			case 26: {
+			case 27: {
 				ui.testForceSlim(null);
 				// Zurück zum ersten Post (quer fotografiert): hochkant ganz zu sehen.
 				int[] screen = spot("screen");
@@ -371,11 +362,23 @@ public final class ReelsTest {
 				next(15);
 				return;
 			}
-			case 27:
+			case 28:
 				AutoTest.shot(mc, "trsclient-reels-11c-hochkant-querfoto");
 				next(15);
 				return;
-			case 28: {
+			case 29:
+				// Hochkant in anderen Fenstergrößen.
+				if (windows(mc, PORTRAIT_WINDOWS, PORTRAIT_WINDOW_SHOTS, "hochkant")) phase++;
+				return;
+			case 30:
+				windowSize(1920, 1080);
+				next(40);
+				return;
+			case 31:
+				check("Fenster wieder 1920×1080", Mc.window().getWidth() == 1920 && Mc.window().getHeight() == 1080);
+				next(5);
+				return;
+			case 32: {
 				AutoTest.key(mc, Keys.code("key.keyboard.r"));
 				boolean rotated = ui.testHold() == PhoneHold.LANDSCAPE;
 				check("Taste R dreht zurück auf quer", rotated);
@@ -385,25 +388,25 @@ public final class ReelsTest {
 				next(30);
 				return;
 			}
-			case 29:
+			case 33:
 				AutoTest.shot(mc, "trsclient-reels-11d-quer-" + (playerSlim(mc) ? "breit" : "slim"));
 				next(15);
 				return;
-			case 30:
+			case 34:
 				ui.testForceSlim(null);
 				// Versuch: leichter Weichzeichner hinter dem Handy (ab Werk aus).
 				ReelsHooks.testBlur(true);
 				next(15);
 				return;
-			case 31:
+			case 35:
 				AutoTest.shot(mc, "trsclient-reels-11e-quer-weichzeichner");
 				next(15);
 				return;
-			case 32:
+			case 36:
 				ReelsHooks.testBlur(false);
 				next(10);
 				return;
-			case 33: {
+			case 37: {
 				// Wegstecken mit der Handy-Taste (echte Taste H; sie gilt, weil sie seit dem Öffnen „los“ war).
 				AutoTest.key(mc, Keys.code("key.keyboard.h"));
 				check("Taste H steckt das Handy weg (Schließen läuft)", ui.isClosing() || !ReelsHooks.phoneOpen());
@@ -411,7 +414,7 @@ public final class ReelsTest {
 				next(30);
 				return;
 			}
-			case 34: {
+			case 38: {
 				check("Handy ist zu", !ReelsHooks.phoneOpen() && Mc.screen() == null);
 				check("aufgeräumt (dispose)", ui.disposed());
 				check("Handy-Taste ist wieder frei (Sperre gelöst, weil die Taste los ist)", !reels.keyGate().blocked());
@@ -422,11 +425,11 @@ public final class ReelsTest {
 				next(20);
 				return;
 			}
-			case 35:
+			case 39:
 				AutoTest.shot(mc, "trsclient-reels-17-nachher");
 				next(15);
 				return;
-			case 36: {
+			case 40: {
 				// Aus der Außenansicht: das Handy stellt für die Dauer auf Ich-Sicht.
 				mc.options.setCameraType(CameraType.THIRD_PERSON_BACK);
 				boolean opened = ReelsHooks.open();
@@ -436,7 +439,7 @@ public final class ReelsTest {
 				next(20);
 				return;
 			}
-			case 37: {
+			case 41: {
 				// Etwas anderes ersetzt den Bildschirm (wie Tod oder Verbindungsende): trotzdem aufräumen.
 				PhoneUi open = ui;
 				Mc.setScreen(null);
@@ -469,6 +472,32 @@ public final class ReelsTest {
 	}
 
 	// --- Hilfen ---
+
+	/^*
+	 * Eine Fenstergröße nach der anderen: setzen, warten, prüfen (Handy ganz im Fenster, Arm-Enden darunter), Bild.
+	 * Rückgabe: alle Größen sind durch.
+	 *^/
+	private boolean windows(Minecraft mc, int[][] sizes, String[] shots, String label) {
+		int[] size = sizes[index];
+		if (!applied) {
+			windowSize(size[0], size[1]);
+			applied = true;
+			wait = 40;
+			return false;
+		}
+		applied = false;
+		int w = Mc.window().getWidth(), h = Mc.window().getHeight();
+		check("Fenster ist " + size[0] + "×" + size[1] + " (ist " + w + "×" + h + ")", w == size[0] && h == size[1]);
+		int[] phone = ui.testSpot("phone");
+		check("Handy " + label + " liegt ganz im Fenster " + w + "×" + h + " (" + Arrays.toString(phone) + ")",
+				phone != null && phone[0] >= 0 && phone[1] >= 0 && phone[0] + phone[2] <= w && phone[1] + phone[3] <= h);
+		armCheck(label + ", Fenster " + w + "×" + h);
+		AutoTest.shot(mc, "trsclient-reels-" + shots[index]);
+		wait = 15;
+		if (++index < sizes.length) return false;
+		index = 0;
+		return true;
+	}
 
 	/^* Arm-Enden beider Arme liegen unter dem Fensterrand (gerechnet; zu sehen ist es auf dem Bild). *^/
 	private void armCheck(String label) {
@@ -507,6 +536,82 @@ public final class ReelsTest {
 	private static boolean playerSlim(Minecraft mc) {
 		return mc.player != null
 				&& mc.player.getSkin().model() == net.minecraft.world.entity.player.PlayerModelType.SLIM;
+	}
+
+	/^*
+	 * Stellt den Spieler an die feste Stelle der Testwelt – oder, wenn sie nicht mehr trocken und grün ist, in die
+	 * nächste grüne Gegend (Ebene, Wiese, Wald, Kirschhain), ein Stück hinein und mit Blick hinein. Läuft im
+	 * Server-Thread; findet sich nichts, bleibt er am Startpunkt.
+	 *^/
+	private static void greenScene(Minecraft mc) {
+		MinecraftServer server = mc.getSingleplayerServer();
+		if (server == null) return;
+		server.execute(() -> {
+			try {
+				net.minecraft.server.level.ServerLevel level = server.overworld();
+				if (server.getPlayerList().getPlayers().isEmpty()) return;
+				java.util.function.Predicate<net.minecraft.core.Holder<net.minecraft.world.level.biome.Biome>> green = h ->
+						h.is(net.minecraft.world.level.biome.Biomes.PLAINS) || h.is(net.minecraft.world.level.biome.Biomes.MEADOW)
+								|| h.is(net.minecraft.world.level.biome.Biomes.FOREST)
+								|| h.is(net.minecraft.world.level.biome.Biomes.FLOWER_FOREST)
+								|| h.is(net.minecraft.world.level.biome.Biomes.BIRCH_FOREST)
+								|| h.is(net.minecraft.world.level.biome.Biomes.CHERRY_GROVE)
+								|| h.is(net.minecraft.world.level.biome.Biomes.SUNFLOWER_PLAINS);
+				// Eine Stelle dieser Welt (Startwert 4242), die sich bewährt hat: Ebene an einem Fluss. Passt sie nicht
+				// mehr (andere Weltgenerierung), wird von einem festen Punkt aus gesucht – so oder so jedes Mal dieselbe
+				// Szene, unabhängig davon, wo der Spieler gerade gelandet ist.
+				int x = SCENE[0], z = SCENE[1];
+				float yaw = SCENE_YAW;
+				int y = dryGreenHeight(level, green, x, z);
+				if (y == Integer.MIN_VALUE) {
+					net.minecraft.core.BlockPos from = new net.minecraft.core.BlockPos(0, 64, 0);
+					com.mojang.datafixers.util.Pair<net.minecraft.core.BlockPos, net.minecraft.core.Holder<net.minecraft.world.level.biome.Biome>> hit =
+							level.findClosestBiome3d(green, from, 4096, 32, 64);
+					if (hit == null) {
+						TrsClient.LOGGER.info("[Autotest] Reels: keine grüne Gegend in der Nähe – Szene bleibt am Startpunkt");
+						return;
+					}
+					double dx = hit.getFirst().getX() - from.getX(), dz = hit.getFirst().getZ() - from.getZ();
+					double len = Math.max(1.0, Math.sqrt(dx * dx + dz * dz));
+					dx /= len;
+					dz /= len;
+					// Trockenes, grünes Land: zuerst geradeaus weiter hinein, dann schräg und quer dazu.
+					double[][] turns = {{1, 0}, {0.7, 0.7}, {0.7, -0.7}, {0, 1}, {0, -1}};
+					for (int t = 0; t < turns.length && y == Integer.MIN_VALUE; t++) {
+						double ax = dx * turns[t][0] - dz * turns[t][1], az = dz * turns[t][0] + dx * turns[t][1];
+						for (int d = 64; d <= 384 && y == Integer.MIN_VALUE; d += 32) {
+							x = hit.getFirst().getX() + (int) Math.round(ax * d);
+							z = hit.getFirst().getZ() + (int) Math.round(az * d);
+							y = dryGreenHeight(level, green, x, z);
+							// Blick weiter in die Gegend hinein.
+							yaw = (float) Math.toDegrees(Math.atan2(-ax, az));
+						}
+					}
+					if (y == Integer.MIN_VALUE) {
+						TrsClient.LOGGER.info("[Autotest] Reels: kein trockenes grünes Land gefunden – Szene bleibt am Startpunkt");
+						return;
+					}
+				}
+				String tp = String.format(Locale.ROOT, "tp @p %.1f %d %.1f %.1f 6", x + 0.5, y, z + 0.5, yaw);
+				server.getCommands().performPrefixedCommand(server.createCommandSourceStack().withSuppressedOutput(), tp);
+				TrsClient.LOGGER.info("[Autotest] Reels: Szene bei {} {} {}, Blick {}° ({})", x, y, z, Math.round(yaw),
+						level.getBiome(new net.minecraft.core.BlockPos(x, y, z)).unwrapKey().map(k -> k.toString()).orElse("?"));
+			} catch (RuntimeException | LinkageError e) {
+				TrsClient.LOGGER.warn("[Autotest] Reels: Szene bleibt am Startpunkt", e);
+			}
+		});
+	}
+
+	/^*
+	 * Höhe der Oberfläche an dieser Stelle, wenn sie trocken (kein Wasser obenauf – sonst lägen die beiden Höhenkarten
+	 * auseinander) und grün ist; sonst {@code Integer.MIN_VALUE}. Lädt den Chunk; nur im Server-Thread.
+	 *^/
+	private static int dryGreenHeight(net.minecraft.server.level.ServerLevel level,
+			java.util.function.Predicate<net.minecraft.core.Holder<net.minecraft.world.level.biome.Biome>> green, int x, int z) {
+		level.getChunk(x >> 4, z >> 4);
+		int y = level.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING, x, z);
+		boolean dry = y == level.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.OCEAN_FLOOR, x, z);
+		return dry && green.test(level.getBiome(new net.minecraft.core.BlockPos(x, y, z))) ? y : Integer.MIN_VALUE;
 	}
 
 	/^* Befehl als Server, ohne Rückmeldung im Chat. *^/
