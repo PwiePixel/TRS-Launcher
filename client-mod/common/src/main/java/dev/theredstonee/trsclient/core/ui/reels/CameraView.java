@@ -78,7 +78,7 @@ final class CameraView {
 			int gh = Math.min(sh, p(230));
 			FeedView.gradient(c, sx, sy + sh - gh, sw, gh, 0f, 0.867f, 0.38f, 1f);
 		}
-		int statusW = FeedView.statusBar(c, ui, l, !land);
+		int statusW = FeedView.statusBar(c, ui, l, !land, 0);
 		int[] shutter = controls();
 		top(statusW, shutter);
 		modes(shutter);

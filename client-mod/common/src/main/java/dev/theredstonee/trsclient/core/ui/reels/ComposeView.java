@@ -54,7 +54,7 @@ final class ComposeView {
 
 	private void portrait() {
 		int statusH = Math.max(p(34), PhoneText.height(PhoneText.scale(24, l.q)));
-		FeedView.statusBar(c, ui, l, true);
+		FeedView.statusBar(c, ui, l, true, 0);
 
 		// Kopfleiste
 		int mTitle = PhoneText.scale(36, l.q);
@@ -97,7 +97,7 @@ final class ComposeView {
 		c.fill(panelX, sy, sx + sw, sy + sh, FeedView.BAR);
 		c.fill(panelX, sy, panelX + line, sy + sh, FeedView.BAR_LINE);
 		ui.tap("composePanel", panelX, sy, panelW, sh, null);
-		int statusW = FeedView.statusBar(c, ui, l, false);
+		int statusW = FeedView.statusBar(c, ui, l, false, 0);
 
 		int pad = p(14);
 		int left = panelX + line + pad;

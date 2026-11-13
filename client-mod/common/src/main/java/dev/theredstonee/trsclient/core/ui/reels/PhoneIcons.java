@@ -4,7 +4,8 @@ import dev.theredstonee.trsclient.core.ui.Canvas;
 
 /**
  * Die Pixel-Symbole auf dem Handy (MC-Reels), genau wie in den freigegebenen Bildern. Sie stehen nicht in
- * {@code core.ui.Icons}, weil sie nicht 8×8 groß sind (Herz 9×8, Flamme 7×9, Kamera 11×7 …).
+ * {@code core.ui.Icons}, weil sie nicht 8×8 groß sind (Herz 9×8, Flamme 7×9, Kamera 11×7 …). Speichern, Sonne, Kiste und
+ * der Pfeil nach unten kamen mit „Bild speichern“, den Marken am Post und dem Filter dazu.
  */
 final class PhoneIcons {
 	static final String[] HEART = {".##...##.", "####.####", "#########", "#########", ".#######.", "..#####..", "...###...",
@@ -20,6 +21,15 @@ final class PhoneIcons {
 	static final String[] FLIP = {"..#####..", ".#.....#.", "#......##", "#.....###", "#........", "###.....#", "##......#",
 			".#.....#.", "..#####.."};
 	static final String[] X = {"#.....#", ".#...#.", "..#.#..", "...#...", "..#.#..", ".#...#.", "#.....#"};
+	/** „Bild speichern“: Pfeil in eine Ablage. */
+	static final String[] SAVE = {"...###...", "...###...", "...###...", ".#######.", "..#####..", "...###...", "#...#...#",
+			"#########"};
+	/** Shaderpack (Marke am Post). */
+	static final String[] SUN = {"...#...", ".#...#.", "..###..", "#.###.#", "..###..", ".#...#.", "...#..."};
+	/** Instanz im TRS Launcher (Marke am Post). */
+	static final String[] BOX = {"#######", "#.....#", "#######", "#..#..#", "#.....#", "#.....#", "#######"};
+	/** Pfeil nach unten (Marke „Alle · Neu“ öffnet ein Blatt). */
+	static final String[] DOWN = {"#####", ".###.", "..#.."};
 
 	/** Schatten der Symbole: dieselbe Form, um eine halbe Pixelgröße nach rechts unten versetzt. */
 	static final int SHADOW = 0x80000000;

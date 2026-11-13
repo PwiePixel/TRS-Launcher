@@ -1,22 +1,27 @@
 package dev.theredstonee.trsclient.core.ui.reels;
 
 import dev.theredstonee.trsclient.core.i18n.I18n;
+import dev.theredstonee.trsclient.core.reels.FeedFilter;
 import dev.theredstonee.trsclient.core.reels.PhoneHold;
 import dev.theredstonee.trsclient.core.reels.PhoneLayout;
 import dev.theredstonee.trsclient.core.reels.ReelsComment;
+import dev.theredstonee.trsclient.core.reels.ReelsMeta;
 import dev.theredstonee.trsclient.core.reels.ReelsPost;
 import dev.theredstonee.trsclient.core.reels.ReelsTime;
 import dev.theredstonee.trsclient.core.ui.Affine;
 import dev.theredstonee.trsclient.core.ui.Canvas;
 import dev.theredstonee.trsclient.core.ui.TextureRef;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
 /**
- * Der Feed auf dem Bildschirm des Handys (MC-Reels): ein Foto je Seite, darüber Uhr, Streak, Titel und Seitenzahl,
- * rechts Herz und Kommentare, unten Name, Text und (hochkant) die Leiste Feed · Kamera · Drehen. Quer stehen Kamera
- * und Drehen mit in der rechten Spalte. Dazu das Kommentar-Blatt über dem unteren Teil.
+ * Der Feed auf dem Bildschirm des Handys (MC-Reels): ein Foto je Seite, darüber Uhr, Streak, Titel, Seitenzahl und die
+ * Marke für Filter und Reihenfolge, rechts Herz, Kommentare und „Bild speichern“, unten Name, Text und (hochkant) die
+ * Leiste Feed · Kamera · Drehen. Quer stehen Kamera und Drehen mit in der rechten Spalte. Unter dem Text stehen kleine
+ * Marken, womit das Foto aufgenommen wurde (Shaderpack, Instanz, Version). Dazu das Kommentar-Blatt über dem unteren
+ * Teil; die übrigen Blätter zeichnet {@link SheetView}.
  *
  * <p>Alle Maße sind Handy-Pixel aus dem freigegebenen Entwurf ({@code reels()} / {@code reelsLand()}), umgerechnet über
  * {@link PhoneLayout#q}. Gezeichnet wird nur innerhalb des Bildschirm-Rechtecks – ohne Scissor: Fotos werden über
@@ -52,15 +57,47 @@ final class FeedView {
 	static final int GRADIENT_BANDS = 32;
 	/** So viele Kommentare zeigt das Blatt höchstens (die neuesten). */
 	static final int MAX_COMMENTS_SHOWN = 4;
+	/** Marken am Post: Shader- und Instanz-Name zeigen höchstens so viele Zeichen (dann „…“). */
+	static final int META_NAME_CHARS = 28;
+	/** Eine gekürzte Marke braucht Platz für ihr Symbol und mindestens so viele Zeichen – sonst fällt sie weg. */
+	static final int META_MIN_CHARS = 6;
+	/** Die Marke für Filter und Reihenfolge fällt weg, wenn weniger als so viele Zeichen von ihr übrig blieben. */
+	static final int FILTER_MIN_CHARS = 4;
+
+	/** Eine Marke unter dem Text: wo sie in ihrer Zeile steht und was sie zeigt. */
+	private static final class Chip {
+		final String spot;
+		final String[] icon;
+		final String text;
+		final int row;
+		final int x;
+		final int w;
+
+		Chip(String spot, String[] icon, String text, int row, int x, int w) {
+			this.spot = spot;
+			this.icon = icon;
+			this.text = text;
+			this.row = row;
+			this.x = x;
+			this.w = w;
+		}
+	}
 
 	private final PhoneUi ui;
+	private final SheetView sheets;
 	private Canvas c;
 	private PhoneLayout l;
 	private boolean land;
 	private int sx, sy, sw, sh;
+	/** Rechte Spalte dieses Bildes: y der ersten Zeile, Abstand der Zeilen, mit „Bild speichern“? (y < 0: keine Spalte). */
+	private int railY, railGap;
+	private boolean railSave;
+	/** Unterkante von Seitenzahl und Filter-Marke (Fensterpixel) – darüber wächst der Textblock nicht hinaus. */
+	private int headBottom;
 
-	FeedView(PhoneUi ui) {
+	FeedView(PhoneUi ui, SheetView sheets) {
 		this.ui = ui;
+		this.sheets = sheets;
 	}
 
 	/** Handy-Pixel → Fensterpixel (darf 0 werden; für Abstände). */
@@ -87,9 +124,14 @@ final class FeedView {
 			int gh = Math.min(sh, p(land ? 190 : 360));
 			gradient(sx, sy + sh - gh, sw, gh, 0f, 0.8f, 0.5f, 1f);
 		}
+		railPlan(post != null);
 		int statusW = status();
+		headBottom = 0;
 		int posW = post == null ? 0 : position();
-		title(Math.max(posW, land ? statusW : 0));
+		// Filter und Reihenfolge: nur, wenn es überhaupt Posts gibt (sonst sieht der leere Feed aus wie immer).
+		int chipW = ui.feedSize() > 0 ? filterChip(posW) : 0;
+		title(Math.max(posW + chipW, land ? statusW : 0));
+		ui.headBottom = headBottom;
 		if (post == null) {
 			empty(navH);
 		} else {
@@ -98,6 +140,7 @@ final class FeedView {
 		rail(post);
 		if (!land) nav(navH);
 		if (post != null && ui.view() == PhoneUi.View.COMMENTS) comments(post);
+		sheets.draw(c, l);
 	}
 
 	// --- Foto ---
@@ -165,16 +208,27 @@ final class FeedView {
 
 	// --- Kopfzeile: Uhr, Streak, Titel, Seitenzahl ---
 
-	/** Uhr links (nur hochkant) und Streak rechts. Rückgabe: Breite des Streak-Blocks samt Rand. */
+	/**
+	 * Uhr links (nur hochkant) und Streak rechts – im Feed ist die Flamme eine Klickfläche (öffnet „Streak“). Sie reicht
+	 * höchstens bis an die erste Klickfläche der rechten Spalte. Rückgabe: Breite des Streak-Blocks samt Rand.
+	 */
 	private int status() {
-		return statusBar(c, ui, l, !land);
+		int want = Math.max(1, p(land ? 38 : 46));
+		if (railY >= 0) {
+			// Die erste Zeile der Spalte: Herz (Klickfläche beginnt einen halben Rand darüber) oder der Kamera-Knopf.
+			int first = railY - (ui.current() != null ? Math.max(1, p(8)) / 2 : 0) - sy;
+			want = Math.max(1, Math.min(want, first));
+		}
+		return statusBar(c, ui, l, !land, want);
 	}
 
 	/**
 	 * Kopfzeile des Handys – auf jeder Ansicht gleich: Streak (Flamme + Tage) rechts, die Uhr links, wenn {@code clock}.
-	 * Rückgabe: Breite des Streak-Blocks samt Rand (0, wenn er nicht hineinpasst).
+	 * Mit {@code tapHeight} > 0 (Feed) ist der Streak-Block eine Klickfläche dieser Höhe (mindestens so hoch wie die
+	 * Zeile), etwas breiter als der Block; sonst (Kamera, „Neuer Post“) nur eine gemerkte Stelle. Rückgabe: Breite des
+	 * Streak-Blocks samt Rand (0, wenn er nicht hineinpasst).
 	 */
-	static int statusBar(Canvas c, PhoneUi ui, PhoneLayout l, boolean clock) {
+	static int statusBar(Canvas c, final PhoneUi ui, PhoneLayout l, boolean clock, int tapHeight) {
 		int sx = l.screenX, sy = l.screenY, sw = l.screenW;
 		int m = PhoneText.scale(24, l.q);
 		// In winzigen Fenstern ist die Zeile niedriger als die Schrift – dann zählt die Schrifthöhe.
@@ -192,7 +246,19 @@ final class FeedView {
 		if (block + 2 * pad > sw) return 0;
 		PhoneIcons.draw(c, PhoneIcons.FLAME, right - block, sy + Math.max(0, (h - fh) / 2), fs, AMBER, true);
 		PhoneText.draw(c, streak, right - tw, ty, m, AMBER_LIGHT, true);
-		ui.spot("streak", right - block, sy, block, Math.max(h, fh));
+		if (tapHeight > 0) {
+			int hx = Math.round((l.hold == PhoneHold.PORTRAIT ? 10 : 8) * l.q);
+			int x1 = Math.max(sx, right - block - hx);
+			int x2 = Math.min(sx + sw, right + hx);
+			ui.tap("streak", x1, sy, x2 - x1, Math.min(l.screenH, Math.max(Math.max(h, fh), tapHeight)), new Runnable() {
+				@Override
+				public void run() {
+					ui.openStreakSheet();
+				}
+			});
+		} else {
+			ui.spot("streak", right - block, sy, block, Math.max(h, fh));
+		}
 		if (clock) {
 			PhoneText.line(c, ui.clock(), sx + pad, ty, m, sw - 2 * pad - block - gap, WHITE, true);
 		}
@@ -215,7 +281,65 @@ final class FeedView {
 		int h = PhoneText.height(k) + 2 * padY;
 		c.fill(left, top, left + w, top + h, CHIP);
 		PhoneText.draw(c, t, left + padX, top + padY, k, WHITE, true);
+		ui.spot("pos", left, top, w, h);
+		headBottom = Math.max(headBottom, top + h);
 		return p(12) + w;
+	}
+
+	/**
+	 * Die Marke „Alle · Neu“ (Filter und Reihenfolge, mit kleinem Pfeil): ein Klick öffnet das Blatt „Feed“. Quer steht
+	 * sie rechts neben der Seitenzahl, hochkant unter Seitenzahl und Titel. Ohne Post im Bild (der Filter zeigt nichts)
+	 * steht sie quer an der Stelle der Seitenzahl. Passt weniger als {@link #FILTER_MIN_CHARS} Zeichen, fällt sie weg –
+	 * Tab öffnet das Blatt trotzdem.
+	 *
+	 * @param posW Breite der Seitenzahl samt linkem Rand (0: keine)
+	 * @return quer: so viel Platz belegt die Marke links neben dem Titel zusätzlich; hochkant 0
+	 */
+	private int filterChip(int posW) {
+		String text = ui.filterLabel(ui.filter()) + " · " + ui.sortLabel(ui.sort());
+		int m = PhoneText.scale(22, l.q);
+		int padX = p(8);
+		int padY = Math.max(1, p(3));
+		int gapIcon = p(5);
+		int h = PhoneText.height(m) + 2 * padY;
+		int mTitle = PhoneText.scale(32, l.q);
+		int left, top, room;
+		if (land) {
+			left = sx + (posW > 0 ? posW + p(8) : p(12));
+			top = sy + p(12);
+			// Bis an den Titel in der Mitte.
+			int titleW = PhoneText.width(c, I18n.tr("reels.tab"), mTitle);
+			room = sx + sw / 2 - titleW / 2 - p(10) - left;
+		} else {
+			left = sx + p(12);
+			int titleBottom = sy + p(40) + PhoneText.height(mTitle) + p(5) + l.px(4);
+			top = Math.max(sy + p(46) + h + p(6), titleBottom + p(4));
+			room = sw - 2 * p(12);
+		}
+		int k = PhoneText.fit(c, text, m, room - 2 * padX - gapIcon - PhoneIcons.width(PhoneIcons.DOWN, m));
+		int iw = PhoneIcons.width(PhoneIcons.DOWN, k), ih = PhoneIcons.height(PhoneIcons.DOWN, k);
+		String t = PhoneText.clip(c, text, k, room - 2 * padX - gapIcon - iw);
+		if (t.codePointCount(0, t.length()) < FILTER_MIN_CHARS) return 0;
+		int w = PhoneText.width(c, t, k) + 2 * padX + gapIcon + iw;
+		if (top + h > sy + sh) return 0;
+		c.fill(left, top, left + w, top + h, CHIP);
+		int ty = top + padY + Math.round((PhoneText.CAP_H * m - PhoneText.CAP_H * k) / 2f);
+		PhoneText.draw(c, t, left + padX, ty, k, WHITE, true);
+		PhoneIcons.draw(c, PhoneIcons.DOWN, left + w - padX - iw, top + (h - ih) / 2, k, WHITE, true);
+		headBottom = Math.max(headBottom, top + h);
+		// Die Klickfläche ist größer als die Marke, bleibt aber auf dem Bildschirm.
+		int hitX = p(4);
+		int hitUp = land ? p(8) : p(4);
+		int hitDown = land ? p(8) : p(18);
+		int x1 = Math.max(sx, left - hitX), x2 = Math.min(sx + sw, left + w + hitX);
+		int y1 = Math.max(sy, top - hitUp), y2 = Math.min(sy + sh, top + h + hitDown);
+		ui.tap("filterChip", x1, y1, x2 - x1, y2 - y1, new Runnable() {
+			@Override
+			public void run() {
+				ui.openSheet(PhoneUi.Sheet.FILTER);
+			}
+		});
+		return land ? (posW > 0 ? p(8) : p(12)) + w : 0;
 	}
 
 	/** „Reels“ mit rotem Strich, mittig. {@code sideW}: so viel Platz ist links bzw. rechts schon belegt. */
@@ -230,13 +354,70 @@ final class FeedView {
 		c.fill(sx + sw / 2 - w / 2, lineY, sx + sw / 2 - w / 2 + w, lineY + l.px(4), RED);
 	}
 
-	// --- Rechte Spalte: Herz, Kommentare (quer zusätzlich Kamera und Drehen) ---
+	// --- Rechte Spalte: Herz, Kommentare, Bild speichern (quer zusätzlich Kamera und Drehen) ---
+
+	/** Pixelgröße des Symbols „Bild speichern“: quer klein wie „Drehen“, hochkant so groß wie das Herz. */
+	private int saveSize() {
+		return land ? l.px(4) : l.px(6);
+	}
+
+	/**
+	 * Legt die rechte Spalte dieses Bildes fest ({@link #railY}, {@link #railGap}, {@link #railSave}) – vor der
+	 * Kopfzeile, weil die Klickfläche der Flamme an der Spalte endet.
+	 *
+	 * <p>Passt die Spalte mit „Bild speichern“ nicht zwischen Kopfzeile und unteren Rand (hochkant: die Leiste), rücken
+	 * die Zeilen enger zusammen; reicht auch das nicht, fällt „Bild speichern“ weg und der alte Abstand gilt wieder.
+	 */
+	private void railPlan(boolean post) {
+		int isz = l.px(6);
+		int m = PhoneText.scale(24, l.q);
+		int gap = p(land ? 20 : 22);
+		int itemH = PhoneIcons.height(PhoneIcons.HEART, isz) + p(4) + PhoneText.height(m);
+		int saveH = PhoneIcons.height(PhoneIcons.SAVE, saveSize());
+		int camH = Math.max(1, p(44));
+		int flipH = PhoneIcons.height(PhoneIcons.FLIP, l.px(4));
+
+		int base = 0, rows = 0;
+		if (post) {
+			base += 2 * itemH;
+			rows += 2;
+		}
+		if (land) {
+			base += camH + flipH;
+			rows += 2;
+		}
+		railY = -1;
+		railGap = gap;
+		railSave = false;
+		if (rows == 0) return;
+		int top = sy + p(40);
+		int room = (land ? sy + sh - p(8) : sy + sh - p(92)) - top;
+		int total = base + (rows - 1) * gap;
+		if (post) {
+			int with = base + saveH + rows * gap;
+			if (with <= room) {
+				railSave = true;
+				total = with;
+			} else {
+				int tight = Math.max(p(8), (room - base - saveH) / rows);
+				if (base + saveH + rows * tight <= room) {
+					railSave = true;
+					railGap = tight;
+					total = base + saveH + rows * tight;
+				}
+			}
+		}
+		int y = land ? sy + (sh - total) / 2 : sy + sh - p(92) - total;
+		// In sehr kleinen Fenstern nicht in die Kopfzeile rutschen.
+		railY = Math.max(y, top);
+	}
 
 	private void rail(final ReelsPost post) {
+		if (railY < 0) return;
 		int isz = l.px(6);
 		int m = PhoneText.scale(24, l.q);
 		int gapIcon = p(4);
-		int gapItem = p(land ? 20 : 22);
+		int gapItem = railGap;
 		int iconW = PhoneIcons.width(PhoneIcons.HEART, isz);
 		int iconH = PhoneIcons.height(PhoneIcons.HEART, isz);
 		int countH = PhoneText.height(m);
@@ -245,16 +426,9 @@ final class FeedView {
 		int flipS = l.px(4);
 		int flipH = PhoneIcons.height(PhoneIcons.FLIP, flipS);
 		int colW = land ? Math.max(iconW, camW) : iconW;
-
-		int total = 0;
-		if (post != null) total += 2 * itemH + gapItem;
-		if (land) total += (post != null ? gapItem : 0) + camH + gapItem + flipH;
-		if (total <= 0) return;
 		int right = sx + sw - p(land ? 16 : 12);
 		int cx = right - colW / 2;
-		int y = land ? sy + (sh - total) / 2 : sy + sh - p(92) - total;
-		// In sehr kleinen Fenstern nicht in die Kopfzeile rutschen.
-		y = Math.max(y, sy + p(40));
+		int y = railY;
 		int pad = Math.max(1, p(8));
 
 		if (post != null) {
@@ -279,6 +453,20 @@ final class FeedView {
 				}
 			});
 			y += itemH + gapItem;
+
+			if (railSave) {
+				// „Bild speichern“: nur das Symbol, ohne Zahl.
+				int ss = saveSize();
+				int saveW = PhoneIcons.width(PhoneIcons.SAVE, ss), saveH = PhoneIcons.height(PhoneIcons.SAVE, ss);
+				PhoneIcons.draw(c, PhoneIcons.SAVE, cx - saveW / 2, y, ss, WHITE, true);
+				ui.tap("save", cx - colW / 2 - pad, y - pad / 2, colW + 2 * pad, saveH + pad, new Runnable() {
+					@Override
+					public void run() {
+						ui.openSheet(PhoneUi.Sheet.SAVE);
+					}
+				});
+				y += saveH + gapItem;
+			}
 		}
 		if (land) {
 			cameraButton(cx - camW / 2, y, camW, camH);
@@ -314,7 +502,7 @@ final class FeedView {
 		});
 	}
 
-	// --- Unten links: Kopf, Name, Streak, Text, Zeit ---
+	// --- Unten links: Kopf, Name, Streak, Text, Zeit, Marken ---
 
 	private void info(ReelsPost post, int navH) {
 		int left = sx + p(land ? 16 : 14);
@@ -350,7 +538,22 @@ final class FeedView {
 		int metaLine = (PhoneText.GLYPH_H + 2) * mMeta;
 		int metaH = meta == null ? 0 : metaGap + PhoneText.height(mMeta) + meta2.size() * metaLine;
 
-		int y = bottom - (rowH + capH + metaH);
+		// Marken ganz unten (Shader, Instanz, Version): der Block endet an derselben Kante und wächst nach oben – aber
+		// nicht über Seitenzahl und Filter-Marke hinaus. Passt keine Zeile mehr darunter, fallen die Marken weg.
+		int mChip = PhoneText.scale(19, l.q);
+		int chipH = PhoneText.height(mChip) + 2 * Math.max(1, p(3));
+		int chipGap = p(land ? 8 : 6);
+		int chipRowGap = p(4);
+		int chipRows = land ? 1 : 2;
+		List<Chip> chips = chips(post.meta, mChip, w, chipRows);
+		int chipsH = chipsHeight(chips, chipH, chipGap, chipRowGap);
+		while (chipsH > 0 && bottom - (rowH + capH + metaH + chipsH) < Math.max(headBottom, sy)) {
+			chipRows--;
+			chips = chips(post.meta, mChip, w, chipRows);
+			chipsH = chipsHeight(chips, chipH, chipGap, chipRowGap);
+		}
+
+		int y = bottom - (rowH + capH + metaH + chipsH);
 		// Kopf und Name
 		String author = post.author == null || post.author.isEmpty() ? "?" : post.author;
 		boolean self = ui.isSelf(post.author);
@@ -382,7 +585,98 @@ final class FeedView {
 			for (int i = 0; i < meta2.size(); i++) {
 				PhoneText.draw(c, meta2.get(i), left, y + metaGap + (i + 1) * metaLine, mMeta, TEXT_SOFT, true);
 			}
+			y += metaH;
 		}
+		if (chipsH > 0) {
+			y += chipGap;
+			for (Chip chip : chips) chip(chip, left + chip.x, y + chip.row * (chipH + chipRowGap), chipH, mChip);
+		}
+	}
+
+	private static int chipsHeight(List<Chip> chips, int chipH, int gapAbove, int rowGap) {
+		if (chips.isEmpty()) return 0;
+		int rows = chips.get(chips.size() - 1).row + 1;
+		return gapAbove + rows * chipH + (rows - 1) * rowGap;
+	}
+
+	/**
+	 * Die Marken eines Posts, verteilt auf höchstens {@code maxRows} Zeilen der Breite {@code w}: Shader, Instanz,
+	 * Version – was nicht bekannt ist, hat keine Marke.
+	 *
+	 * <p>Shader und Instanz: passt die Marke in den Rest der Zeile, steht sie dort. Sonst beginnt sie die nächste Zeile,
+	 * wenn es eine gibt (notfalls auf die Spaltenbreite gekürzt). In der letzten Zeile wird sie mit „…“ auf den Rest
+	 * gekürzt, wenn dort ihr Symbol und {@link #META_MIN_CHARS} Zeichen Platz haben – sonst fällt sie weg.
+	 *
+	 * <p>Die Version („26.2 · Fabric“) steht nur neben einer anderen Marke oder wenn sie vom laufenden Spiel abweicht
+	 * (allein stünde auf jedem Post dasselbe). Sie wird nie gekürzt und beginnt nie eine eigene Zeile hinter einer
+	 * anderen Marke: passt sie nicht ganz dahinter, fällt sie als Erste weg.
+	 */
+	private List<Chip> chips(ReelsMeta meta, int m, int w, int maxRows) {
+		List<Chip> out = new ArrayList<Chip>();
+		if (meta == null || maxRows <= 0 || w <= 0) return out;
+		int pad = p(7);
+		int gap = p(6);
+		int iconGap = p(4);
+		String[] names = {meta.shader, meta.pack};
+		String[][] icons = {PhoneIcons.SUN, PhoneIcons.BOX};
+		String[] spots = {"metaShader", "metaPack"};
+		int row = 0;
+		int x = 0;
+		for (int i = 0; i < names.length; i++) {
+			String name = shorten(names[i], META_NAME_CHARS);
+			if (name.isEmpty()) continue;
+			int fixed = 2 * pad + PhoneIcons.width(icons[i], m) + iconGap;
+			int full = fixed + PhoneText.width(c, name, m);
+			int start = x > 0 ? x + gap : 0;
+			if (start + full > w && x > 0 && row + 1 < maxRows) {
+				row++;
+				x = 0;
+				start = 0;
+			}
+			if (start + full <= w) {
+				out.add(new Chip(spots[i], icons[i], name, row, start, full));
+				x = start + full;
+				continue;
+			}
+			int room = w - start;
+			if (room < fixed + META_MIN_CHARS * 6 * m) continue;
+			String cut = PhoneText.clip(c, name, m, room - fixed);
+			if (cut.isEmpty()) continue;
+			int cw = fixed + PhoneText.width(c, cut, m);
+			out.add(new Chip(spots[i], icons[i], cut, row, start, cw));
+			x = start + cw;
+		}
+		String version = meta.versionLabel();
+		if (version != null && !version.isEmpty() && (meta.shader != null || meta.pack != null || ui.versionDiffers(meta))) {
+			int full = 2 * pad + PhoneText.width(c, version, m);
+			int start = x > 0 ? x + gap : 0;
+			if (start + full <= w) out.add(new Chip("metaVersion", null, version, row, start, full));
+		}
+		return out;
+	}
+
+	/** Höchstens {@code max} Zeichen, sonst mit „…“ gekürzt (ein Zeichenpaar bleibt ganz); null wird leer. */
+	private static String shorten(String s, int max) {
+		if (s == null) return "";
+		if (s.codePointCount(0, s.length()) <= max) return s;
+		String cut = s.substring(0, s.offsetByCodePoints(0, max - 1));
+		int end = cut.length();
+		while (end > 0 && cut.charAt(end - 1) == ' ') end--;
+		return cut.substring(0, end) + "…";
+	}
+
+	/** Eine Marke: dunkles Feld, davor (wenn vorhanden) das Symbol, dann der Text. */
+	private void chip(Chip chip, int x, int y, int h, int m) {
+		int pad = p(7);
+		c.fill(x, y, x + chip.w, y + h, CHIP);
+		int tx = x + pad;
+		if (chip.icon != null) {
+			int ih = PhoneIcons.height(chip.icon, m);
+			PhoneIcons.draw(c, chip.icon, tx, y + (h - ih) / 2, m, TEXT_SOFT, false);
+			tx += PhoneIcons.width(chip.icon, m) + p(4);
+		}
+		PhoneText.draw(c, chip.text, tx, y + (h - PhoneText.height(m)) / 2, m, TEXT_SOFT, true);
+		ui.spot(chip.spot, x, y, chip.w, h);
 	}
 
 	/** Gesicht des Spielers aus seinem Skin (mit Hut-Schicht); für fremde Namen ein farbiges Feld mit Anfangsbuchstaben. */
@@ -432,11 +726,22 @@ final class FeedView {
 
 	// --- Leerer Feed ---
 
+	/**
+	 * Kein Post im Bild. Ist der Feed wirklich leer, steht da wie immer „Noch keine Fotos“ mit den Tasten. Zeigt nur der
+	 * Filter nichts, sagt der Text das ehrlich: unter „Freunde“, dass Fotos von Freunden erst mit einem Server kommen
+	 * (ohne die Tasten-Zeile), unter „Ich“, dass es noch keine eigenen gibt.
+	 */
 	private void empty(int navH) {
 		int side = p(land ? 130 : 24);
 		int max = sw - 2 * side;
 		if (max <= 0) return;
+		boolean filtered = ui.feedSize() > 0;
+		boolean friends = filtered && ui.filter() == FeedFilter.FRIENDS;
+		String title = !filtered ? I18n.tr("reels.empty") : friends ? I18n.tr("reels.empty.friends") : I18n.tr("reels.empty.mine");
+		String hintText = friends ? I18n.tr("reels.empty.friends.hint") : I18n.tr("reels.empty.hint");
 		int top = sy + p(land ? 56 : 96);
+		// Hochkant steht die Filter-Marke unter dem Titel: der Text beginnt darunter.
+		if (!land && headBottom > 0) top = Math.max(top, headBottom + p(6));
 		int bottom = sy + sh - navH - p(12);
 		int cx = sx + sw / 2;
 
@@ -445,11 +750,12 @@ final class FeedView {
 		int mBig = PhoneText.scale(36, l.q);
 		int mHint = PhoneText.scale(24, l.q);
 		int mKeys = PhoneText.scale(19, l.q);
-		List<String> hint = PhoneText.wrap(c, I18n.tr("reels.empty.hint"), mHint, max, 2);
-		List<String> keys = PhoneText.wrap(c, I18n.tr("reels.hint.keys", ui.rotateKeyLabel(), ui.openKeyLabel()), mKeys, max, 4);
+		List<String> hint = PhoneText.wrap(c, hintText, mHint, max, friends ? 4 : 2);
+		List<String> keys = friends ? new ArrayList<String>()
+				: PhoneText.wrap(c, I18n.tr("reels.hint.keys", ui.rotateKeyLabel(), ui.openKeyLabel()), mKeys, max, 4);
 		int hintLine = (PhoneText.GLYPH_H + 2) * mHint;
 		int keysLine = (PhoneText.GLYPH_H + 2) * mKeys;
-		int g1 = p(18), g2 = p(10), g3 = p(18);
+		int g1 = p(18), g2 = p(10), g3 = keys.isEmpty() ? 0 : p(18);
 		int textH = PhoneText.height(mBig) + g2 + hint.size() * hintLine + g3 + keys.size() * keysLine;
 		boolean icon = ih + g1 + textH <= bottom - top;
 		int total = (icon ? ih + g1 : 0) + textH;
@@ -459,7 +765,7 @@ final class FeedView {
 			PhoneIcons.draw(c, PhoneIcons.CAM, cx - iw / 2, y, isz, ICON_DIM, false);
 			y += ih + g1;
 		}
-		PhoneText.centered(c, I18n.tr("reels.empty"), cx, y, mBig, max, WHITE, true);
+		PhoneText.centered(c, title, cx, y, mBig, max, WHITE, true);
 		y += PhoneText.height(mBig) + g2;
 		for (String line : hint) {
 			if (y + PhoneText.height(mHint) > bottom) return;

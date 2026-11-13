@@ -2,9 +2,12 @@ package dev.theredstonee.trsclient.core.ui.reels;
 
 import dev.theredstonee.trsclient.core.i18n.I18n;
 import dev.theredstonee.trsclient.core.module.TrsModules;
+import dev.theredstonee.trsclient.core.reels.FeedFilter;
+import dev.theredstonee.trsclient.core.reels.FeedSort;
 import dev.theredstonee.trsclient.core.reels.LocalReelsBackend;
 import dev.theredstonee.trsclient.core.reels.PhoneHold;
 import dev.theredstonee.trsclient.core.reels.Reels;
+import dev.theredstonee.trsclient.core.reels.ReelsMeta;
 import dev.theredstonee.trsclient.core.reels.ReelsPost;
 import dev.theredstonee.trsclient.core.ui.Canvas;
 import dev.theredstonee.trsclient.core.ui.TextureRef;
@@ -34,7 +37,9 @@ import java.util.concurrent.Executor;
 
 /**
  * Entwickler-Werkzeug (kein normaler Test): zeichnet das MC-Reels-Handy ohne Spiel in PNG-Dateien – zum Vergleichen mit
- * den freigegebenen Bildern (Arme, Gehäuse, Feed, Kommentare, verschiedene Fenstergrößen und GUI-Skalierungen). Die
+ * den freigegebenen Bildern (Arme, Gehäuse, Feed, Kommentare, die Blätter „Bild“, „Feed“ und „Streak“, die Marken am
+ * Post, verschiedene Fenstergrößen und GUI-Skalierungen). Geklickt wird dabei nie auf „Bild kopieren“ oder „Ordner
+ * öffnen“ – das Werkzeug fasst weder die Zwischenablage noch den Dateimanager an. Die
  * Zeichenfläche ist eine einfache Software-Umsetzung von {@link Canvas}; die Schrift ist nur ähnlich breit wie die des
  * Spiels (6 px je Zeichen), nicht dieselbe.
  *
@@ -369,12 +374,96 @@ class PhoneRenderTool {
 					pageShot(reels, modules, bg, out, "seite2-quer", PhoneHold.LANDSCAPE, slim);
 					pageShot(reels, modules, bg, out, "seite2-hochkant", PhoneHold.PORTRAIT, slim);
 				}
+				additions(reels, modules, backend, bg, out, slim, ImageIO.read(new File(files[files.length - 1].trim())), now);
 			}
 		} finally {
 			Textures.replaceForTests(before);
 			Reels.clearForTest();
 			I18n.use("en");
 		}
+	}
+
+	/**
+	 * Die Ergänzungen: die drei Blätter, der Feed unter „Freunde“ und „Beliebt“, Posts mit Marken (Shader, Instanz,
+	 * Version) und der Streak-Schutz am Tag nach einem verpassten Tag (dafür ein eigener Feed).
+	 */
+	private void additions(Reels reels, TrsModules modules, LocalReelsBackend backend, BufferedImage bg, Path out, boolean slim,
+			BufferedImage photo, long now) throws Exception {
+		PhoneHold[] holds = PhoneHold.values();
+		int[][] sizes = {{1920, 1080, 2}, {854, 480, 1}};
+		for (PhoneHold hold : holds) {
+			for (int[] s : sizes) {
+				String tag = (hold == PhoneHold.LANDSCAPE ? "quer" : "hochkant") + (s[0] == 1920 ? "" : "-" + s[0]);
+				sheetShot(reels, modules, bg, out, "blatt-bild-" + tag, s, hold, slim, PhoneUi.Sheet.SAVE, 0);
+				sheetShot(reels, modules, bg, out, "blatt-feed-" + tag, s, hold, slim, PhoneUi.Sheet.FILTER, 0);
+				sheetShot(reels, modules, bg, out, "blatt-streak-" + tag, s, hold, slim, PhoneUi.Sheet.STREAK, 0);
+			}
+		}
+		// Filter „Freunde“ (ohne Server leer) und Reihenfolge „Beliebt“.
+		modules.reels.feedFilter.set(FeedFilter.FRIENDS);
+		shot(reels, modules, bg, out, "leer-freunde-quer", 1920, 1080, 2, PhoneHold.LANDSCAPE, slim, false);
+		shot(reels, modules, bg, out, "leer-freunde-hochkant", 1920, 1080, 2, PhoneHold.PORTRAIT, slim, false);
+		modules.reels.feedFilter.set(FeedFilter.MINE);
+		modules.reels.feedSort.set(FeedSort.POPULAR);
+		shot(reels, modules, bg, out, "feed-ich-beliebt-quer", 1920, 1080, 2, PhoneHold.LANDSCAPE, slim, false);
+		shot(reels, modules, bg, out, "feed-ich-beliebt-hochkant", 1920, 1080, 2, PhoneHold.PORTRAIT, slim, false);
+		modules.reels.feedFilter.set(FeedFilter.ALL);
+		modules.reels.feedSort.set(FeedSort.NEWEST);
+
+		// Posts mit Marken: lange Namen (die Version fällt weg bzw. die Namen werden gekürzt) und kurze.
+		metaPost(backend, photo, now - 120000L, new ReelsMeta("26.2", "fabric", "Complementary Reimagined r5.5.1",
+				"All the Mods 10 – To the Sky"));
+		shot(reels, modules, bg, out, "marken-lang-quer", 1920, 1080, 2, PhoneHold.LANDSCAPE, slim, false);
+		shot(reels, modules, bg, out, "marken-lang-hochkant", 1920, 1080, 2, PhoneHold.PORTRAIT, slim, false);
+		shot(reels, modules, bg, out, "marken-lang-hochkant-854", 854, 480, 1, PhoneHold.PORTRAIT, slim, false);
+		metaPost(backend, photo, now - 60000L, new ReelsMeta("1.21.4", "neoforge", "BSL", "Mein Pack"));
+		shot(reels, modules, bg, out, "marken-kurz-quer", 1920, 1080, 2, PhoneHold.LANDSCAPE, slim, false);
+		shot(reels, modules, bg, out, "marken-kurz-hochkant", 1920, 1080, 2, PhoneHold.PORTRAIT, slim, false);
+		shot(reels, modules, bg, out, "marken-kurz-quer-854", 854, 480, 1, PhoneHold.LANDSCAPE, slim, false);
+
+		// Streak-Schutz: heute gepostet, gestern fehlt, davor drei Tage in Folge – „Gestern retten“ wird angeboten.
+		Path work = Files.createTempDirectory("trs-reels-render-streak");
+		LocalReelsBackend streak = new LocalReelsBackend(work, TimeZone.getDefault());
+		Executor direct = new Executor() {
+			@Override
+			public void execute(Runnable r) {
+				r.run();
+			}
+		};
+		Reels rescue = Reels.forTest(modules, streak, direct, TimeZone.getDefault());
+		long day = 86400000L;
+		long[] at = {now - 4 * day, now - 3 * day, now - 2 * day, now};
+		for (long t : at) metaPost(streak, photo, t, null);
+		for (PhoneHold hold : holds) {
+			String tag = hold == PhoneHold.LANDSCAPE ? "quer" : "hochkant";
+			sheetShot(rescue, modules, bg, out, "blatt-streak-retten-" + tag, sizes[0], hold, slim, PhoneUi.Sheet.STREAK, 0);
+			sheetShot(rescue, modules, bg, out, "blatt-streak-sicher-" + tag, sizes[0], hold, slim, PhoneUi.Sheet.STREAK, 2);
+			sheetShot(rescue, modules, bg, out, "blatt-streak-retten-" + tag + "-854", sizes[1], hold, slim, PhoneUi.Sheet.STREAK, 0);
+		}
+	}
+
+	/** Post mit eigener Kopie des Fotos, wahlweise mit Angaben, womit es aufgenommen wurde. */
+	private static void metaPost(LocalReelsBackend backend, BufferedImage photo, long at, ReelsMeta meta) throws Exception {
+		String id = backend.newId(at);
+		Path target = backend.newPhotoFile(id);
+		Files.createDirectories(target.getParent());
+		ImageIO.write(photo, "png", target.toFile());
+		backend.post(id + ".png", photo.getWidth(), photo.getHeight(), photo.getHeight() > photo.getWidth(), false,
+				"Aussicht hinter meiner Basis", "PixelDEV_CAM", at, meta);
+	}
+
+	/**
+	 * Feed mit offenem Blatt. {@code armed}: 1 bzw. 2 drückt vorher einmal „Heute pausieren“ bzw. „Gestern retten“ (der
+	 * Knopf fragt dann nach, eingelöst wird nichts).
+	 */
+	private void sheetShot(Reels reels, TrsModules modules, BufferedImage bg, Path out, String name, int[] size, PhoneHold hold,
+			boolean slim, PhoneUi.Sheet sheet, int armed) throws Exception {
+		modules.reels.hold.set(hold);
+		PhoneUi ui = new PhoneUi(reels, host(size[0], size[1], size[2], slim));
+		pump(ui, size[0], size[1], size[2], 1);
+		ui.openSheet(sheet);
+		if (armed != 0) ui.useProtection(armed == 2, false);
+		write(ui, bg, out, name, size[0], size[1], size[2]);
 	}
 
 	private void shot(Reels reels, TrsModules modules, BufferedImage bg, Path out, String name, int w, int h, int gui,

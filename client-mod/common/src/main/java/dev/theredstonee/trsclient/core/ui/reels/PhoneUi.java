@@ -6,13 +6,21 @@ import dev.theredstonee.trsclient.core.input.KeyCombo;
 import dev.theredstonee.trsclient.core.module.KeySetting;
 import dev.theredstonee.trsclient.core.module.TrsModules;
 import dev.theredstonee.trsclient.core.reels.ArmRig;
+import dev.theredstonee.trsclient.core.reels.FeedFilter;
 import dev.theredstonee.trsclient.core.reels.FeedPager;
+import dev.theredstonee.trsclient.core.reels.FeedQuery;
+import dev.theredstonee.trsclient.core.reels.FeedSort;
 import dev.theredstonee.trsclient.core.reels.PhoneHold;
 import dev.theredstonee.trsclient.core.reels.PhoneLayout;
 import dev.theredstonee.trsclient.core.reels.PhotoFrame;
 import dev.theredstonee.trsclient.core.reels.Reels;
 import dev.theredstonee.trsclient.core.reels.ReelsComment;
+import dev.theredstonee.trsclient.core.reels.ReelsExport;
+import dev.theredstonee.trsclient.core.reels.ReelsFriends;
+import dev.theredstonee.trsclient.core.reels.ReelsMeta;
 import dev.theredstonee.trsclient.core.reels.ReelsPost;
+import dev.theredstonee.trsclient.core.reels.StreakGuard;
+import dev.theredstonee.trsclient.core.screenshot.ImageClipboard;
 import dev.theredstonee.trsclient.core.ui.Canvas;
 import dev.theredstonee.trsclient.core.ui.FadeCanvas;
 import dev.theredstonee.trsclient.core.ui.Hits;
@@ -21,12 +29,22 @@ import dev.theredstonee.trsclient.core.ui.TextureRef;
 import dev.theredstonee.trsclient.core.ui.Textures;
 import dev.theredstonee.trsclient.core.ui.UiKey;
 import dev.theredstonee.trsclient.core.ui.UiScreen;
+import dev.theredstonee.trsclient.core.util.OpenPath;
 
+import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayDeque;
 import java.util.Calendar;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.RejectedExecutionException;
 
 /**
@@ -41,6 +59,12 @@ import java.util.concurrent.RejectedExecutionException;
  * der Bildschirm. Ansichten: Feed und Kommentare ({@link FeedView}), Kamera mit „Foto“ und „Selfie“
  * ({@link CameraView}) und „Neuer Post“ mit Text ({@link ComposeView}). „Handy drehen“ wechselt zwischen quer und
  * hochkant und merkt sich die Haltung.
+ *
+ * <p><b>Blätter über dem Feed</b> ({@link Sheet}, gezeichnet von {@link SheetView}): „Bild“ (speichern, kopieren, Ordner
+ * öffnen), „Feed“ (Filter und Reihenfolge) und „Streak“ (Streak-Schutz). Solange eines offen ist, gehören Tasten und
+ * Mausrad dem Blatt; Esc schließt nur das Blatt. Der Feed zeigt die gefilterte und sortierte Liste ({@link FeedQuery}) –
+ * der Post, der gerade zu sehen ist, bleibt dabei zu sehen. Speichern, Kopieren und Ordner öffnen laufen im
+ * Hintergrund ({@link Reels#worker()}); ihr Ergebnis kommt über eine Warteschlange zurück, die {@code draw} leert.
  *
  * <p><b>Kamera:</b> der Baum liefert Bilder der Welt <i>ohne</i> Oberfläche ({@link Host#requestFrame} /
  * {@link Host#pollFrame}) – auf einem Foto sind deshalb nie HUD, Chat, Handy oder Arme. Etwa sechsmal je Sekunde kommt
@@ -109,6 +133,42 @@ public final class PhoneUi extends UiScreen {
 
 		/** Bildschirm wirklich schließen (nach der Animation). */
 		void close();
+
+		/** Screenshots-Ordner des Spiels („Bild speichern“) oder null, wenn der Baum keinen kennt. */
+		default Path screenshotsDir() {
+			return null;
+		}
+
+		/**
+		 * Ordner im Dateimanager zeigen („Ordner öffnen“). Läuft im Hintergrund-Thread ({@link Reels#worker()}), nicht im
+		 * Render-Thread. false = ließ sich nicht öffnen.
+		 */
+		default boolean openFolder(Path dir) {
+			return OpenPath.open(dir);
+		}
+
+		/** Bild in die Zwischenablage des Systems („Bild kopieren“). Läuft im Hintergrund-Thread, wie {@link #openFolder}. */
+		default ImageClipboard.Result copyImage(Path png) {
+			return ImageClipboard.copy(png);
+		}
+
+		/**
+		 * Womit jetzt gerade ein Foto aufgenommen würde (Version, Loader, Shaderpack, Instanz) oder null. Wird beim
+		 * Auslösen gerufen und darf nicht auf die Platte warten.
+		 */
+		default ReelsMeta photoMeta() {
+			return null;
+		}
+
+		/** Namen der Freunde (Filter „Freunde“) – null, solange die Liste unbekannt ist. */
+		default Collection<String> friendNames() {
+			return ReelsFriends.names();
+		}
+
+		/** Namen der Spieler, die gerade auf dem Server sind (Namensvorschläge). */
+		default List<String> onlinePlayers() {
+			return Collections.<String>emptyList();
+		}
 	}
 
 	/** Ein Bild der Welt ohne Oberfläche: ARGB, Zeilen von oben. */
@@ -133,6 +193,28 @@ public final class PhoneUi extends UiScreen {
 		COMMENTS,
 		CAMERA,
 		COMPOSE
+	}
+
+	/** Blatt, das im Feed über dem unteren Teil des Bildschirms liegt. */
+	public enum Sheet {
+		NONE,
+		/** „Bild“: speichern, kopieren, Ordner öffnen. */
+		SAVE,
+		/** „Feed“: Filter und Reihenfolge. */
+		FILTER,
+		/** „Streak“: Streak-Schutz. */
+		STREAK
+	}
+
+	/** Eine Meldung, die wartet, bis die laufende vorbei ist. */
+	private static final class Note {
+		final String text;
+		final Runnable action;
+
+		Note(String text, Runnable action) {
+			this.text = text;
+			this.action = action;
+		}
 	}
 
 	/** Fertig gerechnetes Bild für den Sucher (kommt aus dem Hintergrund-Thread). */
@@ -174,6 +256,10 @@ public final class PhoneUi extends UiScreen {
 	/** Dauer des weißen Blitzes nach dem Auslösen und der Meldung auf dem Handy. */
 	static final long FLASH_MS = 220L;
 	static final long TOAST_MS = 3500L;
+	/** So viele Meldungen warten höchstens hinter der laufenden ({@link #announce}). */
+	static final int TOAST_QUEUE = 3;
+	/** Streak-Schutz: so lange gilt „Sicher? Nochmal tippen“. */
+	static final long STREAK_CONFIRM_MS = 3000L;
 	/** Blick drehen: Grad je Fensterpixel beim Ziehen und Grad je Pfeiltasten-Druck. */
 	static final float LOOK_DEG_PER_PX = 0.09f;
 	static final float LOOK_DEG_PER_KEY = 5f;
@@ -188,7 +274,7 @@ public final class PhoneUi extends UiScreen {
 	private final Host host;
 	private final TrsModules modules;
 	private final FeedPager pager = new FeedPager();
-	private final FeedView feedView = new FeedView(this);
+	private final FeedView feedView = new FeedView(this, new SheetView(this));
 	private final CameraView cameraView = new CameraView(this);
 	private final ComposeView composeView = new ComposeView(this);
 	private final PhoneVeil veil = new PhoneVeil();
@@ -230,9 +316,33 @@ public final class PhoneUi extends UiScreen {
 	/** Beim Ziehen im Sucher: letzte Mausposition (Fensterpixel). */
 	private double lookX, lookY;
 	private boolean lookStart;
+	/** Womit das Foto aufgenommen wurde, das gerade entsteht (beim Auslösen festgehalten), oder null. */
+	private ReelsMeta shutterMeta;
+	/** Womit dieses Spiel läuft (beim ersten Bild gelesen) – entscheidet, ob die Versions-Marke allein etwas sagt. */
+	private ReelsMeta ownMeta;
 	// --- Meldung auf dem Handy ---
 	private String toast;
 	private long toastUntil;
+	/** Klick auf die laufende Meldung (null: sie ist nur Text). */
+	private Runnable toastAction;
+	private final ArrayDeque<Note> toastQueue = new ArrayDeque<Note>();
+	/** Unterkante von Seitenzahl und Filter-Marke im letzten Bild des Feeds (Fensterpixel; 0 = keine). */
+	int headBottom;
+	// --- Blätter über dem Feed ---
+	private Sheet sheet = Sheet.NONE;
+	/** Speichern, Kopieren oder Ordner öffnen läuft gerade im Hintergrund – so lange ruhen die drei Knöpfe. */
+	private boolean sheetBusy;
+	/** Ergebnisse aus dem Hintergrund-Thread; {@link #draw} führt sie im Render-Thread aus. */
+	private final ConcurrentLinkedQueue<Runnable> results = new ConcurrentLinkedQueue<Runnable>();
+	/** Streak-Schutz: welcher Knopf gerade „Sicher?“ fragt (0 keiner, 1 pausieren, 2 retten), seit wann, und ob Enter seitdem los war. */
+	private int streakArmed;
+	private long streakArmedAt;
+	private boolean streakEnterUp;
+	private StreakGuard guard;
+	private long guardSecond = Long.MIN_VALUE;
+	private List<ReelsPost> guardFeed;
+	/** Das erste Bild dieses Handys ist gezeichnet (Uhr gemerkt, Rettungs-Hinweis geprüft). */
+	private boolean started;
 
 	private Thumbnails photos;
 	private PhoneHold hold;
@@ -240,7 +350,19 @@ public final class PhoneUi extends UiScreen {
 	private PhoneLayout layout;
 	private ArmRig leftArm;
 	private ArmRig rightArm;
+	/** Die Liste des Backends (alle Posts, neueste zuerst). */
 	private List<ReelsPost> feed;
+	/** Was der Feed zeigt: {@link #feed} gefiltert und sortiert – und womit zuletzt gerechnet wurde. */
+	private List<ReelsPost> shown = Collections.<ReelsPost>emptyList();
+	private List<ReelsPost> shownFeed;
+	private FeedFilter shownFilter;
+	private FeedSort shownSort;
+	private Set<String> shownFriends;
+	private FeedFilter filter;
+	private FeedSort sort;
+	/** Namen der Freunde in Kleinbuchstaben (null = unbekannt); je Bild höchstens einmal neu gelesen. */
+	private Set<String> friends;
+	private boolean friendsFresh;
 	private int guiScale = 1;
 	/** Die Handy-Taste war seit dem Öffnen einmal losgelassen – erst dann steckt sie das Handy wieder weg. */
 	private boolean openKeySeenUp;
@@ -262,6 +384,10 @@ public final class PhoneUi extends UiScreen {
 		this.modules = reels.modules();
 		PhoneHold saved = modules.reels.hold.get();
 		this.hold = saved != null ? saved : PhoneHold.LANDSCAPE;
+		FeedFilter f = modules.reels.feedFilter.get();
+		this.filter = f != null ? f : FeedFilter.ALL;
+		FeedSort o = modules.reels.feedSort.get();
+		this.sort = o != null ? o : FeedSort.NEWEST;
 		I18n.refresh();
 		// Fotos, die noch für ein früheres Handy gespeichert wurden (weggesteckt, bevor sie fertig waren): niemand
 		// postet sie mehr.
@@ -280,6 +406,11 @@ public final class PhoneUi extends UiScreen {
 		spots.clear();
 		// Nach dem Aufräumen wird nichts mehr gezeichnet (sonst kämen freigegebene Texturen zurück).
 		if (disposed || ww <= 0 || wh <= 0) return;
+		friendsFresh = false;
+		if (!started) start();
+		// Was der Hintergrund inzwischen fertig hat (gespeichert, kopiert, Ordner geöffnet).
+		Runnable done;
+		while ((done = results.poll()) != null) done.run();
 		trackOpenKey();
 		if (layout == null || !layout.matches(ww, wh, hold)) {
 			layout = PhoneLayout.of(ww, wh, hold);
@@ -328,18 +459,79 @@ public final class PhoneUi extends UiScreen {
 		if (!key.isBound() || !host.keyDown(KeyCombo.main(key.get()))) openKeySeenUp = true;
 	}
 
-	/** „Neuer Post“: Enter zählt erst, wenn die Taste seit dem Öffnen einmal losgelassen war. */
+	/**
+	 * „Neuer Post“: Enter zählt erst, wenn die Taste seit dem Öffnen einmal losgelassen war. Dasselbe gilt für das zweite
+	 * Enter beim Streak-Schutz; dort verfällt außerdem die Nachfrage nach {@link #STREAK_CONFIRM_MS}.
+	 */
 	private void trackEnter() {
-		if (view != View.COMPOSE || composeEnterUp) return;
-		if (!host.keyDown("key.keyboard.enter") && !host.keyDown("key.keyboard.keypad.enter")) composeEnterUp = true;
+		if (streakArmed != 0 && ticker() - streakArmedAt >= STREAK_CONFIRM_MS) streakArmed = 0;
+		boolean compose = view == View.COMPOSE && !composeEnterUp;
+		boolean streak = streakArmed != 0 && !streakEnterUp;
+		if (!compose && !streak) return;
+		if (host.keyDown("key.keyboard.enter") || host.keyDown("key.keyboard.keypad.enter")) return;
+		if (compose) composeEnterUp = true;
+		if (streak) streakEnterUp = true;
 	}
 
+	/**
+	 * Erstes Bild dieses Handys: der Feed merkt sich den Kalendertag ({@link Reels#noteClock}), und lässt sich gestern
+	 * retten, sagt es einmal am Tag eine Meldung.
+	 */
+	private void start() {
+		started = true;
+		ownMeta = ReelsMeta.normalized(host.photoMeta());
+		long now = now();
+		reels.noteClock(now);
+		StreakGuard g = reels.backend().streakGuard(now);
+		if (g != null && g.canRescueYesterday && reels.hintRescue(reels.epochDay(now))) {
+			announce(I18n.tr("reels.toast.streak.rescuable"), null);
+		}
+	}
+
+	/**
+	 * Die gezeigte Liste neu rechnen, wenn sich die Liste des Backends, der Filter, die Reihenfolge oder (nur bei
+	 * „Freunde“) die Freundesliste geändert hat. Der Post, der gerade zu sehen ist, bleibt zu sehen, solange es ihn in
+	 * der neuen Liste gibt.
+	 */
 	private void refreshFeed() {
 		List<ReelsPost> now = reels.backend().feed();
-		if (now != feed) {
-			feed = now;
-			pager.size(now == null ? 0 : now.size());
+		Set<String> fr = filter == FeedFilter.FRIENDS ? friends() : null;
+		if (now == shownFeed && filter == shownFilter && sort == shownSort && (fr == null ? shownFriends == null : fr.equals(shownFriends))) {
+			return;
 		}
+		int at = pager.index();
+		String keep = at >= 0 && at < shown.size() ? shown.get(at).id : null;
+		feed = now;
+		shownFeed = now;
+		shownFilter = filter;
+		shownSort = sort;
+		shownFriends = fr;
+		shown = FeedQuery.apply(now, filter, sort, host.playerName(), fr);
+		pager.size(shown.size());
+		int i = FeedQuery.indexOf(shown, keep);
+		if (i >= 0 && i != pager.index()) pager.to(i);
+		// „Bild“ gehört zu einem Post: ohne Post kein Blatt.
+		if (sheet == Sheet.SAVE && shown.isEmpty()) closeSheet();
+	}
+
+	/** Namen der Freunde in Kleinbuchstaben oder null (unbekannt) – je Bild höchstens einmal vom Baum geholt. */
+	private Set<String> friends() {
+		if (friendsFresh) return friends;
+		friendsFresh = true;
+		Collection<String> names;
+		try {
+			names = host.friendNames();
+		} catch (RuntimeException e) {
+			names = null;
+		}
+		if (names == null) {
+			friends = null;
+		} else {
+			Set<String> lower = new HashSet<String>();
+			for (String n : names) if (n != null && !n.isEmpty()) lower.add(n.toLowerCase(Locale.ROOT));
+			friends = lower;
+		}
+		return friends;
 	}
 
 	// --- Für die Ansichten (FeedView) ---
@@ -348,12 +540,35 @@ public final class PhoneUi extends UiScreen {
 		return view;
 	}
 
-	/** Der Post der aktuellen Seite oder null (leerer Feed). */
+	/** Der Post der aktuellen Seite oder null (leerer Feed, oder der Filter zeigt nichts). */
 	ReelsPost current() {
 		refreshFeed();
-		if (feed == null || feed.isEmpty()) return null;
-		int i = Math.max(0, Math.min(feed.size() - 1, pager.index()));
-		return feed.get(i);
+		if (shown.isEmpty()) return null;
+		int i = Math.max(0, Math.min(shown.size() - 1, pager.index()));
+		return shown.get(i);
+	}
+
+	/** Wie viele Posts der Feed insgesamt hat – ohne Filter. */
+	int feedSize() {
+		refreshFeed();
+		return feed == null ? 0 : feed.size();
+	}
+
+	FeedFilter filter() {
+		return filter;
+	}
+
+	FeedSort sort() {
+		return sort;
+	}
+
+	/** Anzeigename einer Filter-Option bzw. einer Reihenfolge in der aktiven Sprache (dieselben Texte wie im TRS-Menü). */
+	String filterLabel(FeedFilter f) {
+		return modules.reels.feedFilter.optionLabel(f.ordinal());
+	}
+
+	String sortLabel(FeedSort s) {
+		return modules.reels.feedSort.optionLabel(s.ordinal());
 	}
 
 	int page() {
@@ -428,11 +643,9 @@ public final class PhoneUi extends UiScreen {
 	TextureRef photo(ReelsPost post) {
 		if (disposed || post == null) return null;
 		TextureRef t = load(post);
-		if (feed != null) {
-			int i = pager.index();
-			if (i + 1 < feed.size()) load(feed.get(i + 1));
-			if (i - 1 >= 0 && i - 1 < feed.size()) load(feed.get(i - 1));
-		}
+		int i = pager.index();
+		if (i + 1 < shown.size()) load(shown.get(i + 1));
+		if (i - 1 >= 0 && i - 1 < shown.size()) load(shown.get(i - 1));
 		return t;
 	}
 
@@ -467,6 +680,7 @@ public final class PhoneUi extends UiScreen {
 
 	void openComments() {
 		if (current() == null) return;
+		closeSheet();
 		view = View.COMMENTS;
 		commentInput.clear();
 		commentInput.setFocused(true);
@@ -491,6 +705,7 @@ public final class PhoneUi extends UiScreen {
 
 	/** „Feed“ in der Leiste: zurück zum Feed (schließt die Kommentare bzw. die Kamera). */
 	void home() {
+		closeSheet();
 		closeComments();
 		closeCamera();
 	}
@@ -500,6 +715,7 @@ public final class PhoneUi extends UiScreen {
 	/** Kamera öffnen (aus dem Feed). */
 	void openCamera() {
 		if (disposed || view == View.CAMERA || view == View.COMPOSE) return;
+		closeSheet();
 		closeComments();
 		view = View.CAMERA;
 		finderState = FINDER_IDLE;
@@ -571,6 +787,13 @@ public final class PhoneUi extends UiScreen {
 		shutterAt = t;
 		shutterSelfie = selfie;
 		shutterHold = hold;
+		ReelsMeta meta;
+		try {
+			meta = host.photoMeta();
+		} catch (RuntimeException e) {
+			meta = null;
+		}
+		shutterMeta = ReelsMeta.normalized(meta);
 		flashAt = t;
 		host.requestFrame(true, 0, 0);
 		host.click();
@@ -592,16 +815,10 @@ public final class PhoneUi extends UiScreen {
 	 * wurde, sonst der neueste im Feed.
 	 */
 	TextureRef lastPhoto() {
+		// Der Filter des Feeds zählt hier nicht: das letzte Foto ist das letzte Foto.
 		if (disposed || feed == null || feed.isEmpty()) return null;
-		int i = indexOf(lastPosted);
+		int i = FeedQuery.indexOf(feed, lastPosted);
 		return load(feed.get(i < 0 ? 0 : i));
-	}
-
-	/** Seite des Posts mit dieser ID im Feed oder -1. */
-	private int indexOf(String id) {
-		if (id == null || feed == null) return -1;
-		for (int i = 0; i < feed.size(); i++) if (id.equals(feed.get(i).id)) return i;
-		return -1;
 	}
 
 	/** Fläche des Suchers, auf der Ziehen den Blick dreht (unter allen Knöpfen). */
@@ -800,19 +1017,26 @@ public final class PhoneUi extends UiScreen {
 	 */
 	void postShot() {
 		if (view != View.COMPOSE || shot == null || !postArmed()) return;
-		ReelsPost posted = reels.post(shot, captionInput.text(), host.playerName(), now());
+		ReelsPost posted = reels.post(shot, captionInput.text(), host.playerName(), now(), shutterMeta);
 		if (posted == null) {
 			toast(I18n.tr("reels.toast.failed"));
 			return;
 		}
 		shot = null;
+		shutterMeta = null;
 		releasePreview();
 		captionInput.clear();
 		captionInput.setFocused(false);
 		view = View.FEED;
+		// Unter „Freunde“ wäre der eigene neue Post nicht zu sehen: zurück zu „Alle“.
+		if (filter == FeedFilter.FRIENDS) applyFilter(FeedFilter.ALL);
 		refreshFeed();
+		if (FeedQuery.indexOf(shown, posted.id) < 0 && filter != FeedFilter.ALL) {
+			applyFilter(FeedFilter.ALL);
+			refreshFeed();
+		}
 		lastPosted = posted.id;
-		pager.to(Math.max(0, indexOf(posted.id)));
+		pager.to(Math.max(0, FeedQuery.indexOf(shown, posted.id)));
 		// Die Streak sofort neu rechnen.
 		streakSecond = Long.MIN_VALUE;
 		int days = streak();
@@ -822,17 +1046,39 @@ public final class PhoneUi extends UiScreen {
 
 	// --- Meldung auf dem Handy ---
 
-	/** Kurze Meldung oben auf dem Bildschirm des Handys („Gepostet!“). */
+	/**
+	 * Kurze Meldung oben auf dem Bildschirm des Handys („Gepostet!“) – die Antwort auf einen Klick: sie ersetzt sofort,
+	 * was gerade dasteht.
+	 */
 	void toast(String text) {
+		show(text, null);
+	}
+
+	private void show(String text, Runnable action) {
 		toast = text;
+		toastAction = action;
 		toastUntil = ticker() + TOAST_MS;
 	}
 
+	/**
+	 * Meldung, die von selbst kommt (Hinweis beim Herausholen): steht gerade eine andere da, wartet sie, bis die vorbei
+	 * ist – höchstens {@link #TOAST_QUEUE} warten. {@code action}: Klick auf die Meldung (null: nur Text).
+	 */
+	void announce(String text, Runnable action) {
+		if (text == null || text.isEmpty() || disposed) return;
+		if (toast == null || ticker() >= toastUntil) show(text, action);
+		else if (toastQueue.size() < TOAST_QUEUE) toastQueue.add(new Note(text, action));
+	}
+
 	private void drawToast(Canvas c, PhoneLayout l) {
-		if (toast == null) return;
-		if (ticker() >= toastUntil) {
+		if (toast != null && ticker() >= toastUntil) {
 			toast = null;
-			return;
+			toastAction = null;
+		}
+		if (toast == null) {
+			Note next = toastQueue.poll();
+			if (next == null) return;
+			show(next.text, next.action);
 		}
 		int m = PhoneText.scale(24, l.q);
 		int pad = Math.max(2, Math.round(12 * l.q));
@@ -849,6 +1095,10 @@ public final class PhoneUi extends UiScreen {
 		int x = l.screenX + (l.screenW - w) / 2;
 		// Unter Kopfzeile und Titel, damit beides lesbar bleibt.
 		int y = l.screenY + Math.round((l.hold == PhoneHold.PORTRAIT ? 96 : 58) * l.q);
+		// Hochkant steht die Filter-Marke unter dem Titel: die Meldung rückt darunter.
+		if ((view == View.FEED || view == View.COMMENTS) && l.hold == PhoneHold.PORTRAIT && headBottom > 0) {
+			y = Math.max(y, headBottom + Math.round(6 * l.q));
+		}
 		if (y + h > l.screenY + l.screenH) y = l.screenY + Math.max(0, (l.screenH - h) / 2);
 		if (w > l.screenW || h > l.screenH) return;
 		c.fill(x, y, x + w, y + h, 0xF2111116);
@@ -860,7 +1110,9 @@ public final class PhoneUi extends UiScreen {
 			String s = lines.get(i);
 			PhoneText.draw(c, s, x + (w - PhoneText.width(c, s, m)) / 2, y + pad + i * lineH, m, FeedView.WHITE, false);
 		}
-		spot("toast", x, y, w, h);
+		// Nur eine Meldung, die irgendwohin führt, nimmt Klicks an.
+		if (toastAction != null) tap("toast", x, y, w, h, toastAction);
+		else spot("toast", x, y, w, h);
 	}
 
 	/** Taktgeber für Sucher, Blitz und Meldung (Millisekunden, läuft nur vorwärts). */
@@ -876,7 +1128,287 @@ public final class PhoneUi extends UiScreen {
 	}
 
 	private boolean page(int delta) {
-		return view == View.FEED && pager.step(delta);
+		return view == View.FEED && sheet == Sheet.NONE && pager.step(delta);
+	}
+
+	// --- Blätter über dem Feed: „Bild“, „Feed“, „Streak“ ---
+
+	Sheet sheet() {
+		return sheet;
+	}
+
+	boolean sheetBusy() {
+		return sheetBusy;
+	}
+
+	/** Blatt öffnen – nur im Feed; „Bild“ braucht einen Post, „Feed“ mindestens einen Post im ganzen Feed. */
+	void openSheet(Sheet which) {
+		if (which == null || which == Sheet.NONE || disposed || view != View.FEED || isClosing()) return;
+		if (which == Sheet.SAVE && current() == null) return;
+		if (which == Sheet.FILTER && feedSize() == 0) return;
+		sheet = which;
+		streakArmed = 0;
+		host.click();
+	}
+
+	void closeSheet() {
+		sheet = Sheet.NONE;
+		streakArmed = 0;
+	}
+
+	/** Tasten, solange ein Blatt offen ist. Verbraucht jede Taste – auch Esc: es schließt nur das Blatt. */
+	private boolean sheetKey(UiKey key) {
+		if (sheet == Sheet.SAVE) {
+			if (key == UiKey.ESCAPE) closeSheet();
+			else if (key == UiKey.ENTER) savePicture();
+		} else if (sheet == Sheet.FILTER) {
+			if (key == UiKey.ESCAPE || key == UiKey.ENTER || key == UiKey.TAB) closeSheet();
+			else if (key == UiKey.LEFT) stepFilter(-1);
+			else if (key == UiKey.RIGHT) stepFilter(1);
+			else if (key == UiKey.UP) stepSort(-1);
+			else if (key == UiKey.DOWN) stepSort(1);
+		} else if (sheet == Sheet.STREAK) {
+			if (key == UiKey.ESCAPE) {
+				closeSheet();
+			} else if (key == UiKey.ENTER) {
+				StreakGuard g = streakGuard();
+				if (g.canPauseToday) useProtection(false, true);
+				else if (g.canRescueYesterday) useProtection(true, true);
+			}
+		}
+		return true;
+	}
+
+	// --- „Bild“: speichern, kopieren, Ordner öffnen (ohne Netz – nur diese Platte und die Zwischenablage) ---
+
+	/** Der Screenshots-Ordner als fester Pfad (der Spielordner ist im Entwickler-Start nur „.“) oder null. */
+	private Path screenshots() {
+		try {
+			Path dir = host.screenshotsDir();
+			return dir == null ? null : dir.toAbsolutePath().normalize();
+		} catch (RuntimeException e) {
+			return null;
+		}
+	}
+
+	/** Auftrag an den Hintergrund-Thread; so lange ruhen die drei Knöpfe. false: der Thread nimmt nichts mehr an. */
+	private boolean background(Runnable job) {
+		sheetBusy = true;
+		try {
+			reels.worker().execute(job);
+			return true;
+		} catch (RejectedExecutionException e) {
+			sheetBusy = false;
+			return false;
+		}
+	}
+
+	/** „Bild speichern“: das Foto des Posts in den Screenshots-Ordner kopieren (überschreibt nie). */
+	void savePicture() {
+		if (sheet != Sheet.SAVE || sheetBusy || disposed) return;
+		ReelsPost post = current();
+		if (post == null) return;
+		host.click();
+		final Path dir = screenshots();
+		if (dir == null) {
+			toast(I18n.tr("reels.toast.save.failed"));
+			return;
+		}
+		final Path photo = reels.backend().photoFile(post);
+		final String id = post.id;
+		Runnable job = new Runnable() {
+			@Override
+			public void run() {
+				ReelsExport.Status status;
+				try {
+					status = ReelsExport.save(photo, dir, id).status;
+				} catch (RuntimeException e) {
+					status = ReelsExport.Status.FAILED;
+				}
+				final ReelsExport.Status done = status;
+				results.add(new Runnable() {
+					@Override
+					public void run() {
+						saved(done);
+					}
+				});
+			}
+		};
+		if (!background(job)) toast(I18n.tr("reels.toast.save.failed"));
+	}
+
+	private void saved(ReelsExport.Status status) {
+		sheetBusy = false;
+		if (status == ReelsExport.Status.SAVED || status == ReelsExport.Status.ALREADY) {
+			if (sheet == Sheet.SAVE) closeSheet();
+			toast(I18n.tr(status == ReelsExport.Status.SAVED ? "reels.toast.saved" : "reels.toast.saved.already"));
+		} else {
+			// Das Blatt bleibt: „Bild kopieren“ oder der Ordner helfen vielleicht weiter.
+			toast(I18n.tr(status == ReelsExport.Status.MISSING ? "reels.toast.save.missing" : "reels.toast.save.failed"));
+		}
+	}
+
+	/** „Bild kopieren“: das Foto in die Zwischenablage des Systems. */
+	void copyPicture() {
+		if (sheet != Sheet.SAVE || sheetBusy || disposed) return;
+		ReelsPost post = current();
+		if (post == null) return;
+		host.click();
+		final Path photo = reels.backend().photoFile(post);
+		Runnable job = new Runnable() {
+			@Override
+			public void run() {
+				ImageClipboard.Result result;
+				try {
+					result = photo == null ? ImageClipboard.Result.FAILED : host.copyImage(photo);
+				} catch (RuntimeException e) {
+					result = ImageClipboard.Result.FAILED;
+				}
+				final ImageClipboard.Result done = result;
+				results.add(new Runnable() {
+					@Override
+					public void run() {
+						sheetBusy = false;
+						toast(I18n.tr(done == ImageClipboard.Result.OK ? "reels.toast.copied"
+								: done == ImageClipboard.Result.UNSUPPORTED ? "reels.toast.copy.unsupported" : "reels.toast.copy.failed"));
+					}
+				});
+			}
+		};
+		if (!background(job)) toast(I18n.tr("reels.toast.copy.failed"));
+	}
+
+	/** „Ordner öffnen“: den Screenshots-Ordner anlegen, falls nötig, und im Dateimanager zeigen. */
+	void openPictureFolder() {
+		if (sheet != Sheet.SAVE || sheetBusy || disposed) return;
+		host.click();
+		final Path dir = screenshots();
+		if (dir == null) {
+			toast(I18n.tr("reels.toast.folder.failed"));
+			return;
+		}
+		Runnable job = new Runnable() {
+			@Override
+			public void run() {
+				boolean ok;
+				try {
+					Files.createDirectories(dir);
+					ok = host.openFolder(dir);
+				} catch (IOException | RuntimeException e) {
+					ok = false;
+				}
+				final boolean opened = ok;
+				results.add(new Runnable() {
+					@Override
+					public void run() {
+						sheetBusy = false;
+						if (!opened) toast(I18n.tr("reels.toast.folder.failed"));
+					}
+				});
+			}
+		};
+		if (!background(job)) toast(I18n.tr("reels.toast.folder.failed"));
+	}
+
+	// --- „Feed“: Filter und Reihenfolge ---
+
+	/** Filter wählen: gilt sofort und wird gemerkt. */
+	void setFilter(FeedFilter f) {
+		if (f == null || f == filter) return;
+		applyFilter(f);
+		host.click();
+	}
+
+	private void applyFilter(FeedFilter f) {
+		filter = f;
+		modules.reels.feedFilter.set(f);
+		// Die Freundesliste gleich neu lesen, nicht erst im nächsten Bild.
+		friendsFresh = false;
+	}
+
+	/** Reihenfolge wählen: gilt sofort und wird gemerkt. */
+	void setSort(FeedSort s) {
+		if (s == null || s == sort) return;
+		sort = s;
+		modules.reels.feedSort.set(s);
+		host.click();
+	}
+
+	private void stepFilter(int delta) {
+		FeedFilter[] all = FeedFilter.values();
+		setFilter(all[Math.max(0, Math.min(all.length - 1, filter.ordinal() + delta))]);
+	}
+
+	private void stepSort(int delta) {
+		FeedSort[] all = FeedSort.values();
+		setSort(all[Math.max(0, Math.min(all.length - 1, sort.ordinal() + delta))]);
+	}
+
+	// --- „Streak“: Streak-Schutz ---
+
+	/** Tipp auf die Flamme (nur im Feed). */
+	void openStreakSheet() {
+		openSheet(Sheet.STREAK);
+	}
+
+	/** Stand des Streak-Schutzes (höchstens einmal je Sekunde und nach jeder Änderung des Feeds neu gerechnet). */
+	StreakGuard streakGuard() {
+		long second = now() / 1000L;
+		List<ReelsPost> list = reels.backend().feed();
+		if (guard == null || second != guardSecond || list != guardFeed) {
+			guardSecond = second;
+			guardFeed = list;
+			StreakGuard g = reels.backend().streakGuard(now());
+			guard = g != null ? g : StreakGuard.NONE;
+		}
+		return guard;
+	}
+
+	/** Welcher Knopf gerade „Sicher? Nochmal tippen“ zeigt: 0 keiner, 1 „Heute pausieren“, 2 „Gestern retten“. */
+	int streakArmed() {
+		if (streakArmed != 0 && ticker() - streakArmedAt >= STREAK_CONFIRM_MS) streakArmed = 0;
+		return streakArmed;
+	}
+
+	/**
+	 * „Heute pausieren“ bzw. „Gestern retten“. Der erste Druck fragt nur nach; der zweite löst den Schutz ein – aber erst
+	 * {@link #POST_GUARD_MS} nach dem ersten (ein Doppelklick gibt nichts aus), und Enter erst, nachdem es einmal
+	 * losgelassen war (eine gehaltene Taste auch nicht).
+	 */
+	void useProtection(boolean yesterday, boolean byEnter) {
+		if (sheet != Sheet.STREAK || disposed) return;
+		int button = yesterday ? 2 : 1;
+		long t = ticker();
+		if (streakArmed() != button) {
+			streakArmed = button;
+			streakArmedAt = t;
+			streakEnterUp = false;
+			host.click();
+			return;
+		}
+		if (t - streakArmedAt < POST_GUARD_MS || (byEnter && !streakEnterUp)) return;
+		streakArmed = 0;
+		StreakGuard.Result result = reels.protect(yesterday, now());
+		// Streak und Schutz-Stand sofort neu rechnen.
+		streakSecond = Long.MIN_VALUE;
+		guard = null;
+		if (result != StreakGuard.Result.OK) return;
+		closeSheet();
+		host.click();
+		if (yesterday) {
+			int days = streak();
+			toast(days == 1 ? I18n.tr("reels.toast.streak.rescued.one", days) : I18n.tr("reels.toast.streak.rescued", days));
+		} else {
+			toast(I18n.tr("reels.toast.streak.paused"));
+		}
+	}
+
+	/** Weicht die gespeicherte Version oder der Loader eines Posts von diesem Spiel ab? Mit unbekannten Werten nie. */
+	boolean versionDiffers(ReelsMeta m) {
+		ReelsMeta own = ownMeta;
+		if (m == null || own == null) return false;
+		if (m.mc != null && own.mc != null && !m.mc.equals(own.mc)) return true;
+		return m.loader != null && own.loader != null && !m.loader.equals(own.loader);
 	}
 
 	// --- Eingaben (kommen in GUI-Einheiten, die Klickflächen liegen in Fensterpixeln) ---
@@ -896,7 +1428,7 @@ public final class PhoneUi extends UiScreen {
 
 	@Override
 	public boolean mouseScrolled(double mouseX, double mouseY, double amount) {
-		if (view == View.FEED && !isClosing()) pager.wheel(amount);
+		if (view == View.FEED && sheet == Sheet.NONE && !isClosing()) pager.wheel(amount);
 		return true;
 	}
 
@@ -941,9 +1473,14 @@ public final class PhoneUi extends UiScreen {
 			return true;
 		}
 		if (view == View.CAMERA) return cameraKey(name, key);
+		if (view == View.FEED && sheet != Sheet.NONE) return sheetKey(key);
 		switch (key) {
 			case ENTER:
 				openComments();
+				return true;
+			case TAB:
+				// „Feed“ (Filter und Reihenfolge) – ohne einen einzigen Post gibt es nichts zu filtern.
+				openSheet(Sheet.FILTER);
 				return true;
 			case DOWN:
 			case RIGHT:
@@ -1073,6 +1610,12 @@ public final class PhoneUi extends UiScreen {
 	public void dispose() {
 		if (disposed) return;
 		disposed = true;
+		closeSheet();
+		sheetBusy = false;
+		// Was der Hintergrund noch fertig macht, meldet niemand mehr: eine gespeicherte Datei bleibt einfach liegen.
+		results.clear();
+		toastQueue.clear();
+		toastAction = null;
 		commentInput.setFocused(false);
 		captionInput.setFocused(false);
 		// Ein aufgenommenes, aber nicht gepostetes Foto bleibt nicht auf der Platte liegen.
@@ -1119,11 +1662,16 @@ public final class PhoneUi extends UiScreen {
 
 	/**
 	 * Wo eine Stelle des Handys im letzten Bild lag: {x, y, Breite, Höhe} in Fensterpixeln, oder null. Namen:
-	 * {@code phone}, {@code screen}, {@code photo}, {@code heart}, {@code comment}, {@code camera}, {@code rotate},
-	 * {@code home}, {@code streak}, {@code commentInput}, {@code commentsClose}, {@code commentsBack}; Kamera:
-	 * {@code viewfinder}, {@code camBack}, {@code camNote}, {@code camPhoto}, {@code camSelfie}, {@code camShutter},
-	 * {@code camFlip}, {@code camThumb}; Neuer Post: {@code composePhoto}, {@code composeField}, {@code composeRetry},
-	 * {@code composePost}; dazu {@code toast}.
+	 * {@code phone}, {@code screen}, {@code photo}, {@code heart}, {@code comment}, {@code save}, {@code camera},
+	 * {@code rotate}, {@code home}, {@code streak}, {@code filterChip}, {@code metaShader}, {@code metaPack},
+	 * {@code metaVersion}, {@code commentInput}, {@code commentsClose}, {@code commentsBack}; Kamera: {@code viewfinder},
+	 * {@code camBack}, {@code camNote}, {@code camPhoto}, {@code camSelfie}, {@code camShutter}, {@code camFlip},
+	 * {@code camThumb}; Neuer Post: {@code composePhoto}, {@code composeField}, {@code composeRetry},
+	 * {@code composePost}; Blätter: {@code saveSheet}, {@code saveBack}, {@code saveClose}, {@code saveDo},
+	 * {@code saveCopy}, {@code saveFolder}, {@code filterSheet}, {@code filterBack}, {@code filterClose},
+	 * {@code filterAll}, {@code filterFriends}, {@code filterMine}, {@code sortNewest}, {@code sortPopular},
+	 * {@code streakSheet}, {@code streakBack}, {@code streakClose}, {@code streakPause}, {@code streakRescue}; dazu
+	 * {@code toast}.
 	 */
 	public int[] testSpot(String name) {
 		int[] r = spots.get(name);
@@ -1179,5 +1727,29 @@ public final class PhoneUi extends UiScreen {
 	/** Text im Feld von „Neuer Post“. */
 	public String testCaption() {
 		return captionInput.text();
+	}
+
+	/** Das Blatt, das gerade über dem Feed liegt. */
+	public Sheet testSheet() {
+		return sheet;
+	}
+
+	/** Läuft gerade Speichern, Kopieren oder Ordner öffnen im Hintergrund? */
+	public boolean testSheetBusy() {
+		return sheetBusy;
+	}
+
+	public FeedFilter testFilter() {
+		return filter;
+	}
+
+	public FeedSort testSort() {
+		return sort;
+	}
+
+	/** Stand des Streak-Schutzes, frisch gerechnet. */
+	public StreakGuard testStreakGuard() {
+		StreakGuard g = reels.backend().streakGuard(now());
+		return g != null ? g : StreakGuard.NONE;
 	}
 }
