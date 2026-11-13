@@ -1188,9 +1188,13 @@ class PhoneUiTest {
 		host.down.add("key.keyboard.h");
 		assertTrue(ui.inputKey('H', UiKey.NONE, false));
 		assertTrue(ui.isClosing());
-		// Während es verschwindet, zählen keine Tasten mehr.
+		// Während es verschwindet, zählen keine Tasten und keine Klicks mehr.
 		assertTrue(ui.inputKey('R', UiKey.NONE, false));
 		assertEquals(PhoneHold.LANDSCAPE, ui.testHold());
+		click(ui, "rotate");
+		assertEquals(PhoneHold.LANDSCAPE, ui.testHold());
+		ui.inputScroll(0, 0, -1);
+		assertEquals(0, ui.testPage());
 
 		// Nach der Animation: aufgeräumt, Bildschirm wirklich zu, die Taste ist bis zum Loslassen gesperrt.
 		for (int i = 0; i < 400 && host.closes == 0; i++) {

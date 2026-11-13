@@ -367,6 +367,8 @@ public final class PhoneUi extends UiScreen {
 
 	@Override
 	public boolean mouseClicked(double mouseX, double mouseY, int button) {
+		// Während das Handy verschwindet, zählen keine Klicks mehr.
+		if (isClosing()) return true;
 		return hits.click(mouseX * guiScale, mouseY * guiScale, button);
 	}
 
