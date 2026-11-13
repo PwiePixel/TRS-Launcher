@@ -542,9 +542,13 @@ public final class PhoneUi extends UiScreen {
 	 * Zeigt die Kamera gerade auf den Spieler („Selfie“)? Der Baum dreht dann die Kamera des Spiels für den Sucher und
 	 * das Foto. Hinter dem Handy muss er dabei die normale Sicht stehen lassen (das letzte Bild vor dem Umschalten):
 	 * sonst stünde die eigene Figur zwischen den gezeichneten Armen.
+	 *
+	 * <p>Nicht mehr, sobald das Handy weggesteckt wird: im letzten Bild der Animation verschwindet der Bildschirm, nachdem
+	 * die Kamera des Spiels schon ausgerichtet ist – wäre sie da noch umgedreht, stünde die eigene Figur ein Bild lang
+	 * groß im Fenster. Beim Wegstecken zeigt das Spiel deshalb gleich wieder die normale Sicht.
 	 */
 	public boolean selfieActive() {
-		return !disposed && view == View.CAMERA && selfie;
+		return !disposed && !isClosing() && view == View.CAMERA && selfie;
 	}
 
 	/** Wird gerade ein Foto aufgenommen oder gespeichert? (Der Auslöser ruht so lange.) */
@@ -660,7 +664,8 @@ public final class PhoneUi extends UiScreen {
 			}
 		}
 		if (finderState != FINDER_IDLE && t - finderSince > FRAME_TIMEOUT_MS) finderState = FINDER_IDLE;
-		if (finderState == FINDER_IDLE && images && t - finderLast >= finderInterval(l.windowW, l.windowH)) {
+		// Beim Wegstecken kein neues Sucherbild mehr: der Sucher behält sein letztes (ein Selfie spränge sonst um).
+		if (finderState == FINDER_IDLE && images && !isClosing() && t - finderLast >= finderInterval(l.windowW, l.windowH)) {
 			finderLast = t;
 			finderSince = t;
 			finderState = FINDER_REQUESTED;

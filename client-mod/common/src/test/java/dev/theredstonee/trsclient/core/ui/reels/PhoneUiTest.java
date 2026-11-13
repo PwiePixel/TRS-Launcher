@@ -1990,6 +1990,29 @@ class PhoneUiTest {
 	}
 
 	@Test
+	void puttingThePhoneAwayOnSelfieTurnsTheGameCameraBackAtOnce() {
+		PhoneUi ui = camera(PhoneHold.PORTRAIT);
+		click(ui, "camSelfie");
+		frame(ui);
+		assertTrue(ui.selfieActive());
+		// Handy-Taste in der Kamera: das Handy verschwindet. Die Kamera des Spiels schaut sofort wieder normal – im
+		// letzten Bild der Animation ist der Bildschirm schon weg, ein umgedrehtes Bild stünde dann groß im Fenster.
+		ui.keyPressed('K', UiKey.NONE, false);
+		assertTrue(ui.isClosing());
+		assertTrue(ui.testSelfie(), "die Wahl „Selfie“ selbst bleibt");
+		assertFalse(ui.selfieActive(), "beim Wegstecken dreht das Spiel die Kamera nicht mehr um");
+		// Und der Sucher holt kein neues Bild mehr (er spränge sonst auf die normale Sicht um).
+		int before = host.requests(false);
+		ui.testTicker += 1000;
+		frame(ui);
+		ui.testTicker += 1000;
+		frame(ui);
+		assertEquals(before, host.requests(false));
+		ui.dispose();
+		assertFalse(ui.selfieActive());
+	}
+
+	@Test
 	void selfieSwitchesByLabelFlipButtonTabAndFAndMarksThePost() {
 		PhoneUi ui = camera(PhoneHold.PORTRAIT);
 		assertFalse(ui.selfieActive(), "die Kamera startet auf „Foto“");
