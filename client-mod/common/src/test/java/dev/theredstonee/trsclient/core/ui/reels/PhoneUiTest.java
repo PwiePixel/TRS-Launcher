@@ -1932,6 +1932,64 @@ class PhoneUiTest {
 	}
 
 	@Test
+	void halfAnEmojiFromTheClipboardNeverReachesTheFeed() throws IOException {
+		// Ein Emoji sind zwei Zeichen (ein Paar). Eine Hälfte allein ließe sich nicht speichern – und hielte dann jede
+		// weitere Sicherung des Feeds auf.
+		String pair = new String(Character.toChars(0x1F642));
+		PhoneUi ui = camera(PhoneHold.PORTRAIT);
+		shoot(ui);
+		host.clipboard = "nice " + pair;
+		ui.inputKey(0, UiKey.PASTE, false);
+		assertEquals("nice " + pair, ui.testCaption());
+		ui.inputKey(0, UiKey.BACKSPACE, false);
+		assertEquals("nice ", ui.testCaption(), "die Rücktaste nimmt das Paar als Ganzes");
+		ui.inputChar('!');
+		// Eine einzelne Hälfte in der Zwischenablage kommt gar nicht erst ins Feld.
+		host.clipboard = pair.substring(0, 1) + "!" + pair.substring(1);
+		ui.inputKey(0, UiKey.PASTE, false);
+		assertEquals("nice !!", ui.testCaption());
+		armPost(ui);
+		ui.keyPressed(0, UiKey.ENTER, false);
+		assertEquals("nice !!", backend.feed().get(0).caption);
+		backend.flush();
+		assertFalse(backend.dirty());
+
+		// An der Längengrenze: das Paar passt nur halb – dann gar nicht, und dahinter kommt nichts mehr.
+		frame(ui);
+		click(ui, "camera");
+		frame(ui);
+		shoot(ui);
+		StringBuilder x = new StringBuilder();
+		for (int i = 0; i < ReelsPost.MAX_CAPTION - 1; i++) x.append('x');
+		host.clipboard = x + pair + "y";
+		ui.inputKey(0, UiKey.PASTE, false);
+		assertEquals(x.toString(), ui.testCaption());
+		armPost(ui);
+		ui.keyPressed(0, UiKey.ENTER, false);
+		assertEquals(x.toString(), backend.feed().get(0).caption);
+
+		// Dasselbe im Kommentar.
+		frame(ui);
+		ui.inputKey(0, UiKey.ENTER, false);
+		assertEquals(PhoneUi.View.COMMENTS, ui.testView());
+		host.clipboard = "ok " + pair + pair;
+		ui.inputKey(0, UiKey.PASTE, false);
+		ui.inputKey(0, UiKey.BACKSPACE, false);
+		ui.inputKey(0, UiKey.ENTER, false);
+		assertEquals("ok " + pair, backend.feed().get(0).comments.get(0).text);
+
+		backend.flush();
+		assertFalse(backend.dirty(), "alles gesichert");
+		assertFalse(Files.exists(tmp.resolve("feed.json.tmp")));
+		LocalReelsBackend read = new LocalReelsBackend(tmp, UTC);
+		assertEquals(2, read.feed().size(), "beide Posts sind nach dem Neustart da");
+		assertEquals(x.toString(), read.feed().get(0).caption);
+		assertEquals("ok " + pair, read.feed().get(0).comments.get(0).text);
+		assertEquals("nice !!", read.feed().get(1).caption);
+		ui.dispose();
+	}
+
+	@Test
 	void selfieSwitchesByLabelFlipButtonTabAndFAndMarksThePost() {
 		PhoneUi ui = camera(PhoneHold.PORTRAIT);
 		assertFalse(ui.selfieActive(), "die Kamera startet auf „Foto“");

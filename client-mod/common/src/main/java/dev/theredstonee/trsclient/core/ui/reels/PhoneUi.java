@@ -985,14 +985,34 @@ public final class PhoneUi extends UiScreen {
 	 */
 	private static void edit(TextInput input, UiKey key) {
 		if (key == UiKey.LEFT || key == UiKey.RIGHT || key == UiKey.HOME || key == UiKey.END) return;
+		if (key == UiKey.BACKSPACE) {
+			// Ein Zeichenpaar (Emoji aus der Zwischenablage) geht als Ganzes weg – eine Hälfte allein ist kein Zeichen.
+			String text = input.text();
+			int n = text.length();
+			if (n >= 2 && Character.isLowSurrogate(text.charAt(n - 1)) && Character.isHighSurrogate(text.charAt(n - 2))) {
+				input.key(key);
+			}
+		}
 		input.key(key);
 	}
 
+	/** Einfügen aus der Zwischenablage. Ein Zeichenpaar (Emoji) kommt ganz oder gar nicht – auch an der Längengrenze. */
 	private void paste(TextInput input) {
 		String text = host.paste();
 		if (text == null) return;
 		for (int i = 0; i < text.length(); i++) {
 			char ch = text.charAt(i);
+			if (Character.isHighSurrogate(ch) && i + 1 < text.length() && Character.isLowSurrogate(text.charAt(i + 1))) {
+				// Feld voll: Schluss. Passt nur die zweite Hälfte nicht mehr hinein, geht die erste wieder heraus.
+				if (!input.type(ch)) break;
+				if (!input.type(text.charAt(i + 1))) {
+					input.key(UiKey.BACKSPACE);
+					break;
+				}
+				i++;
+				continue;
+			}
+			if (Character.isSurrogate(ch)) continue;
 			input.type(ch == '\n' || ch == '\r' || ch == '\t' ? ' ' : ch);
 		}
 	}
