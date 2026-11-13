@@ -2755,6 +2755,7 @@
   "reels.compose.retry": "Otra vez",
   "reels.compose.post": "Publicar",
   "reels.compose.streak": "Racha: {0} → {1} días",
+  "reels.compose.streak.same": "Racha: {0} días",
   "reels.compose.local": "Por ahora se queda en este PC.",
   "reels.toast.posted": "¡Publicado! Racha: {0} días",
   "reels.toast.failed": "No se pudo guardar la foto."

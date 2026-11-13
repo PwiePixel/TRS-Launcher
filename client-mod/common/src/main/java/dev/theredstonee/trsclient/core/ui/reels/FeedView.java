@@ -146,6 +146,11 @@ final class FeedView {
 	 * (0…1), {@code a1} unten.
 	 */
 	private void gradient(int x, int y, int w, int h, float a0, float aMid, float mid, float a1) {
+		gradient(c, x, y, w, h, a0, aMid, mid, a1);
+	}
+
+	/** Wie oben, für die anderen Ansichten (Kamera). */
+	static void gradient(Canvas c, int x, int y, int w, int h, float a0, float aMid, float mid, float a1) {
 		if (w <= 0 || h <= 0) return;
 		int bands = Math.min(GRADIENT_BANDS, h);
 		for (int i = 0; i < bands; i++) {
@@ -162,16 +167,25 @@ final class FeedView {
 
 	/** Uhr links (nur hochkant) und Streak rechts. Rückgabe: Breite des Streak-Blocks samt Rand. */
 	private int status() {
+		return statusBar(c, ui, l, !land);
+	}
+
+	/**
+	 * Kopfzeile des Handys – auf jeder Ansicht gleich: Streak (Flamme + Tage) rechts, die Uhr links, wenn {@code clock}.
+	 * Rückgabe: Breite des Streak-Blocks samt Rand (0, wenn er nicht hineinpasst).
+	 */
+	static int statusBar(Canvas c, PhoneUi ui, PhoneLayout l, boolean clock) {
+		int sx = l.screenX, sy = l.screenY, sw = l.screenW;
 		int m = PhoneText.scale(24, l.q);
 		// In winzigen Fenstern ist die Zeile niedriger als die Schrift – dann zählt die Schrifthöhe.
-		int h = Math.max(p(34), PhoneText.height(m));
-		int pad = p(12);
+		int h = Math.max(Math.round(34 * l.q), PhoneText.height(m));
+		int pad = Math.round(12 * l.q);
 		int ty = PhoneText.centerY(sy, h, m);
 		String streak = String.valueOf(ui.streak());
 		int fs = l.px(2);
 		int fw = PhoneIcons.width(PhoneIcons.FLAME, fs);
 		int fh = PhoneIcons.height(PhoneIcons.FLAME, fs);
-		int gap = p(7);
+		int gap = Math.round(7 * l.q);
 		int tw = PhoneText.width(c, streak, m);
 		int right = sx + sw - pad;
 		int block = fw + gap + tw;
@@ -179,7 +193,7 @@ final class FeedView {
 		PhoneIcons.draw(c, PhoneIcons.FLAME, right - block, sy + Math.max(0, (h - fh) / 2), fs, AMBER, true);
 		PhoneText.draw(c, streak, right - tw, ty, m, AMBER_LIGHT, true);
 		ui.spot("streak", right - block, sy, block, Math.max(h, fh));
-		if (!land) {
+		if (clock) {
 			PhoneText.line(c, ui.clock(), sx + pad, ty, m, sw - 2 * pad - block - gap, WHITE, true);
 		}
 		return block + pad;

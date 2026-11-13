@@ -118,6 +118,27 @@ public final class PhotoFrame {
 		return 1;
 	}
 
+	/** Längste Seite der Sucher-Textur (Pixel) – nur in sehr großen Fenstern kleiner als der Sucher selbst. */
+	public static final int MAX_VIEW_SIDE = 2048;
+
+	/**
+	 * Größe der Sucher-Textur für einen Ausschnitt von {@code cropW}×{@code cropH}, der auf dem Bildschirm
+	 * {@code needW}×{@code needH} Fensterpixel einnimmt: so groß wie der Sucher, aber nie größer als der Ausschnitt
+	 * (es wird nie vergrößert) und höchstens {@link #MAX_VIEW_SIDE} lang.
+	 *
+	 * @return {Breite, Höhe}
+	 */
+	public static int[] viewSize(int cropW, int cropH, int needW, int needH) {
+		cropW = Math.max(1, cropW);
+		cropH = Math.max(1, cropH);
+		int w = cropW, h = cropH;
+		if (needW > 0 && needH > 0 && cropW >= needW && cropH >= needH) {
+			w = needW;
+			h = needH;
+		}
+		return outSize(w, h, MAX_VIEW_SIDE);
+	}
+
 	private static int clamp(int v, int min, int max) {
 		return v < min ? min : (v > max ? max : v);
 	}

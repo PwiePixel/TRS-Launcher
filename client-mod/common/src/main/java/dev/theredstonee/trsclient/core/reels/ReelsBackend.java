@@ -37,6 +37,9 @@ public interface ReelsBackend {
 	/** Tage in Folge mit mindestens einem Post (siehe {@link ReelsTime#streak}). */
 	int streak(long now);
 
+	/** Die Streak, die gälte, wenn jetzt ein Post dazukäme (ändert nichts). */
+	int streakAfterPost(long now);
+
 	/** Datei des Fotos eines Posts (null, wenn der Post keinen gültigen Dateinamen hat). */
 	Path photoFile(ReelsPost post);
 

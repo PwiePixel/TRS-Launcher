@@ -375,7 +375,8 @@ class PhoneUiTest {
 
 		@Override
 		public String keyName(int rawKey) {
-			return rawKey == 'H' ? "key.keyboard.h" : rawKey == 'R' ? "key.keyboard.r" : rawKey == 'X' ? "key.keyboard.x" : null;
+			return rawKey == 'H' ? "key.keyboard.h" : rawKey == 'R' ? "key.keyboard.r" : rawKey == 'X' ? "key.keyboard.x"
+					: rawKey == 'F' ? "key.keyboard.f" : rawKey == ' ' ? "key.keyboard.space" : null;
 		}
 
 		@Override
@@ -396,6 +397,45 @@ class PhoneUiTest {
 		@Override
 		public void click() {
 			clicks++;
+		}
+
+		// --- Kamera: Bilder der „Welt“ ---
+		/** Größe der gelieferten Bilder (0 = Fenstergröße). */
+		int frameW, frameH;
+		/** Liefert das „Spiel“ überhaupt Bilder? */
+		boolean frames = true;
+		final List<int[]> requests = new ArrayList<int[]>();
+		final Deque<PhoneUi.Frame> queue = new ArrayDeque<PhoneUi.Frame>();
+		float yaw, pitch;
+		int turns;
+
+		@Override
+		public void turn(float yawDeg, float pitchDeg) {
+			yaw += yawDeg;
+			pitch += pitchDeg;
+			turns++;
+		}
+
+		@Override
+		public void requestFrame(boolean photo, int needW, int needH) {
+			requests.add(new int[]{photo ? 1 : 0, needW, needH});
+			if (!frames) return;
+			int fw = frameW > 0 ? frameW : w, fh = frameH > 0 ? frameH : h;
+			int[] argb = new int[fw * fh];
+			// Erkennbares Muster: rot wächst nach rechts, grün nach unten.
+			for (int y = 0; y < fh; y++) for (int x = 0; x < fw; x++) argb[y * fw + x] = 0xFF000000 | (x * 255 / fw) << 16 | (y * 255 / fh) << 8;
+			queue.add(new PhoneUi.Frame(argb, fw, fh, photo));
+		}
+
+		@Override
+		public PhoneUi.Frame pollFrame() {
+			return queue.poll();
+		}
+
+		int requests(boolean photo) {
+			int n = 0;
+			for (int[] r : requests) if ((r[0] == 1) == photo) n++;
+			return n;
 		}
 
 		@Override
@@ -572,6 +612,9 @@ class PhoneUiTest {
 	@Test
 	void everySizeAndLanguageDrawsAndKeepsTextOnThePhoneScreen() {
 		host.name = "PixelDEV_CAM_16x";
+		// Kleine Bilder der „Welt“, damit die vielen Fotos dieses Tests schnell gespeichert sind.
+		host.frameW = 320;
+		host.frameH = 180;
 		ReelsPost old = post("Aussicht hinter meiner Basis – und ein ziemlich langer Text dazu, der umbrechen muss!", "Rotkaeppchen_2010",
 				30, true);
 		ReelsPost top = post("Schaut mal, wer bei mir eingezogen ist! Der Panda bleibt jetzt für immer hier bei mir.", host.name, 2,
@@ -597,6 +640,22 @@ class PhoneUiTest {
 					ui.mouseScrolled(0, 0, -1);
 					assertEquals(1, ui.testPage(), tag);
 					onScreen(frame(ui), ui, tag + " Seite 2");
+					// Kamera (Foto und Selfie) und „Neuer Post“ mit langem Text.
+					ui.testTicker = 5000;
+					ui.openCamera();
+					assertEquals(PhoneUi.View.CAMERA, ui.testView(), tag);
+					onScreen(frame(ui), ui, tag + " Kamera");
+					ui.keyPressed(0, UiKey.TAB, false);
+					assertTrue(ui.testSelfie(), tag);
+					onScreen(frame(ui), ui, tag + " Kamera Selfie");
+					ui.keyPressed(0, UiKey.ENTER, false);
+					onScreen(frame(ui), ui, tag + " Kamera löst aus");
+					onScreen(frame(ui), ui, tag + " Neuer Post");
+					assertEquals(PhoneUi.View.COMPOSE, ui.testView(), tag);
+					for (char ch : "Ein Text zum Foto, der länger ist als das Feld breit".toCharArray()) ui.inputChar(ch);
+					onScreen(frame(ui), ui, tag + " Neuer Post mit Text");
+					ui.toast(I18n.tr("reels.toast.failed"));
+					onScreen(frame(ui), ui, tag + " Meldung");
 					ui.dispose();
 				}
 			}
@@ -1593,6 +1652,468 @@ class PhoneUiTest {
 		RecCanvas tiny = new RecCanvas(1);
 		PhoneBody.stepped(tiny, 0, 0, 3, 3, 8, 0xFFFFFFFF);
 		assertEquals(1, tiny.fills.size());
+	}
+
+	// --- Kamera, Foto, Neuer Post ---
+
+	/** Öffnet die Kamera über den Knopf im Feed; danach ist ein Bild gezeichnet. */
+	private PhoneUi camera(PhoneHold hold) {
+		PhoneUi ui = ui(hold);
+		ui.testTicker = 1000;
+		frame(ui);
+		click(ui, "camera");
+		assertEquals(PhoneUi.View.CAMERA, ui.testView());
+		frame(ui);
+		return ui;
+	}
+
+	/** Auslösen und warten, bis „Neuer Post“ offen ist. */
+	private Reels.Shot shoot(PhoneUi ui) {
+		click(ui, "camShutter");
+		assertTrue(ui.testBusy(), "nach dem Auslösen läuft die Aufnahme");
+		frame(ui);
+		frame(ui);
+		assertEquals(PhoneUi.View.COMPOSE, ui.testView());
+		Reels.Shot shot = ui.testShot();
+		assertNotNull(shot);
+		assertFalse(shot.failed);
+		assertTrue(Files.isRegularFile(shot.file), "Foto gespeichert: " + shot.file);
+		return shot;
+	}
+
+	@Test
+	void cameraButtonWorksInBothHoldsAndEscapeGoesBackToTheFeed() {
+		post("Hallo", host.name, 1, false);
+		for (PhoneHold hold : PhoneHold.values()) {
+			PhoneUi ui = camera(hold);
+			RecCanvas c = frame(ui);
+			assertTrue(c.shows(I18n.tr("reels.camera.back")), hold + ": " + c.strings());
+			assertTrue(c.shows(I18n.tr("reels.camera.photo")) && c.shows(I18n.tr("reels.camera.selfie")), hold + ": " + c.strings());
+			assertFalse(c.shows("Hallo"), "der Feed ist nicht mehr zu sehen");
+			for (String spot : new String[]{"viewfinder", "camBack", "camPhoto", "camSelfie", "camShutter", "camFlip", "camThumb"}) {
+				assertNotNull(ui.testSpot(spot), hold + ": " + spot);
+			}
+			// Esc: zurück zum Feed, das Handy bleibt offen.
+			assertTrue(ui.keyPressed(0, UiKey.ESCAPE, false), "Esc in der Kamera ist verbraucht");
+			assertEquals(PhoneUi.View.FEED, ui.testView());
+			assertFalse(ui.isClosing());
+			assertTrue(frame(ui).shows("Hallo"));
+			// „Zurück“ und das kleine Foto führen auch zum Feed.
+			for (String back : new String[]{"camBack", "camThumb"}) {
+				click(ui, "camera");
+				frame(ui);
+				click(ui, back);
+				assertEquals(PhoneUi.View.FEED, ui.testView(), back);
+				frame(ui);
+			}
+			ui.dispose();
+		}
+	}
+
+	@Test
+	void viewfinderAsksForFramesSixTimesASecondAndIsNeverBlownUp() {
+		for (PhoneHold hold : PhoneHold.values()) {
+			host.requests.clear();
+			host.queue.clear();
+			host.frameW = 0;
+			host.frameH = 0;
+			PhoneUi ui = ui(hold);
+			ui.testTicker = 1000;
+			frame(ui);
+			assertEquals(0, host.requests.size(), "im Feed wird kein Bild angefordert");
+			click(ui, "camera");
+			RecCanvas first = frame(ui);
+			PhoneLayout l = PhoneLayout.of(host.w, host.h, hold);
+			assertEquals(1, host.requests(false), "das erste Bild sofort");
+			assertEquals(l.screenW, host.requests.get(0)[1], "der Sucher ist so breit wie der Bildschirm des Handys");
+			assertEquals(l.screenH, host.requests.get(0)[2]);
+			assertNull(ui.testViewfinder(), "noch kein Bild da");
+			assertTrue(first.imagesOf(PhoneUi.FINDER_TEXTURE).isEmpty());
+
+			// Das Bild ist da: zugeschnitten und verkleinert auf genau die Größe des Suchers.
+			RecCanvas c = frame(ui);
+			int[] tex = ui.testViewfinder();
+			assertNotNull(tex, hold.toString());
+			assertEquals(l.screenW, tex[0], hold + ": 1920×1080 reicht für den Sucher – die Textur ist so groß wie er");
+			assertEquals(l.screenH, tex[1]);
+			assertTrue(store.live.contains(PhoneUi.FINDER_TEXTURE));
+			List<RecCanvas.Img> drawn = c.imagesOf(PhoneUi.FINDER_TEXTURE);
+			assertEquals(1, drawn.size());
+			assertEquals(l.screenX, drawn.get(0).minX(), 0.01);
+			assertEquals(l.screenY, drawn.get(0).minY(), 0.01);
+			assertEquals(l.screenX + l.screenW, drawn.get(0).maxX(), 0.01);
+			assertEquals(l.screenY + l.screenH, drawn.get(0).maxY(), 0.01);
+
+			// Takt: erst nach 160 ms das nächste.
+			assertEquals(1, host.requests(false));
+			ui.testTicker += 100;
+			frame(ui);
+			assertEquals(1, host.requests(false), "nach 100 ms noch keines");
+			ui.testTicker += 60;
+			frame(ui);
+			assertEquals(2, host.requests(false), "nach 160 ms das nächste");
+			frame(ui);
+			ui.testTicker += 160;
+			frame(ui);
+			assertEquals(3, host.requests(false));
+			frame(ui);
+
+			// Ein kleines Bild der Welt wird nie vergrößert: die Textur ist dann nur so groß wie der Ausschnitt.
+			host.frameW = 480;
+			host.frameH = 270;
+			ui.testTicker += 160;
+			frame(ui);
+			frame(ui);
+			int[] small = ui.testViewfinder();
+			int[] crop = dev.theredstonee.trsclient.core.reels.PhotoFrame.cropRect(480, 270, l.screenW, l.screenH);
+			assertEquals(crop[2], small[0], hold + ": nie größer als die Quelle");
+			assertEquals(crop[3], small[1]);
+			assertTrue(small[0] < l.screenW);
+
+			// Liefert das Spiel kein Bild, wird nach zwei Sekunden neu gefragt (statt für immer zu warten).
+			host.frames = false;
+			int before = host.requests(false);
+			ui.testTicker += 160;
+			frame(ui);
+			assertEquals(before + 1, host.requests(false));
+			ui.testTicker += 1000;
+			frame(ui);
+			assertEquals(before + 1, host.requests(false));
+			ui.testTicker += 1100;
+			frame(ui);
+			assertEquals(before + 2, host.requests(false));
+			host.frames = true;
+
+			// Kamera zu: Sucher-Textur frei, keine Anforderungen mehr.
+			ui.keyPressed(0, UiKey.ESCAPE, false);
+			assertFalse(store.live.contains(PhoneUi.FINDER_TEXTURE), "Sucher freigegeben");
+			int after = host.requests.size();
+			ui.testTicker += 1000;
+			frame(ui);
+			assertEquals(after, host.requests.size());
+			ui.dispose();
+		}
+	}
+
+	@Test
+	void shutterSavesThePhotoUncroppedInItsHoldAndPostingPutsItFirst() throws IOException {
+		post("Älterer Post von gestern", host.name, 30, false);
+		assertEquals(1, backend.streak(NOON), "gestern gepostet: die Streak läuft noch");
+		int[][] expect = {{1280, 720}, {608, 1080}};
+		PhoneHold[] holds = {PhoneHold.LANDSCAPE, PhoneHold.PORTRAIT};
+		for (int i = 0; i < holds.length; i++) {
+			PhoneUi ui = camera(holds[i]);
+			int photosBefore = host.requests(true);
+			int feedBefore = backend.feed().size();
+			int[] change = ui.streakChange();
+			Reels.Shot shot = shoot(ui);
+			assertEquals(photosBefore + 1, host.requests(true), "genau ein Bild in voller Auflösung");
+			assertEquals(expect[i][0], shot.width, holds[i] + ": 1920×1080 → mittiger Ausschnitt, nie vergrößert");
+			assertEquals(expect[i][1], shot.height);
+			assertEquals(holds[i] == PhoneHold.PORTRAIT, shot.portrait);
+			assertFalse(shot.selfie);
+			BufferedImage saved = ImageIO.read(shot.file.toFile());
+			assertEquals(expect[i][0], saved.getWidth());
+			assertEquals(expect[i][1], saved.getHeight());
+			assertEquals(feedBefore, backend.feed().size(), "noch nicht gepostet");
+
+			// „Neuer Post“: Vorschau, Feld, Knöpfe, Hinweise.
+			RecCanvas c = frame(ui);
+			assertTrue(store.live.contains(PhoneUi.PREVIEW_TEXTURE));
+			assertFalse(store.live.contains(PhoneUi.FINDER_TEXTURE), "der Sucher ruht");
+			assertEquals(1, c.imagesOf(PhoneUi.PREVIEW_TEXTURE).size(), "das Foto passt zur Haltung: einmal, füllend");
+			assertTrue(c.shows(I18n.tr("reels.compose.title")), c.strings().toString());
+			assertTrue(c.shows(I18n.tr("reels.compose.hint")), "leeres Feld zeigt den Hinweis");
+			assertTrue(c.shows(I18n.tr("reels.compose.retry")) && c.shows(I18n.tr("reels.compose.post")));
+			assertTrue(c.shows(I18n.tr("reels.compose.local")));
+			String streakLine = i == 0 ? I18n.tr("reels.compose.streak", 1, 2) : I18n.tr("reels.compose.streak.same", 2);
+			assertTrue(c.shows(streakLine), "Streak-Hinweis „" + streakLine + "“: " + c.strings());
+			assertEquals(i == 0 ? 2 : 2, change[1]);
+
+			// Tippen: Buchstaben sind hier nie Kurztasten (H steckt nicht weg, R dreht nicht).
+			String caption = "Mein Haus " + (i + 1);
+			for (char ch : caption.toCharArray()) {
+				ui.keyPressed(Character.toUpperCase(ch), UiKey.NONE, false);
+				ui.inputChar(ch);
+			}
+			assertEquals(caption, ui.testCaption());
+			assertEquals(holds[i], ui.testHold());
+			assertFalse(ui.isClosing());
+			assertTrue(frame(ui).shows(caption));
+
+			// Enter postet: vorn im Feed, Streak 2, Meldung auf dem Handy.
+			ui.keyPressed(0, UiKey.ENTER, false);
+			assertEquals(PhoneUi.View.FEED, ui.testView());
+			assertEquals(0, ui.testPage(), "der neue Post steht vorn");
+			assertEquals(feedBefore + 1, backend.feed().size());
+			ReelsPost top = backend.feed().get(0);
+			assertEquals(caption, top.caption);
+			assertEquals(host.name, top.author);
+			assertEquals(shot.fileName, top.photo);
+			assertEquals(holds[i] == PhoneHold.PORTRAIT, top.portrait);
+			assertEquals(2, backend.streak(NOON));
+			assertEquals(I18n.tr("reels.toast.posted", 2), ui.testToast());
+			assertNull(ui.testShot());
+			assertFalse(store.live.contains(PhoneUi.PREVIEW_TEXTURE), "Vorschau freigegeben");
+			c = frame(ui);
+			assertTrue(c.shows(caption), "der Feed zeigt den neuen Post");
+			assertNotNull(ui.testSpot("toast"));
+			assertTrue(c.shows("Posted!"), c.strings().toString());
+			// Die Meldung verschwindet von selbst.
+			ui.testTicker += PhoneUi.TOAST_MS + 1;
+			c = frame(ui);
+			assertNull(ui.testToast());
+			assertFalse(c.shows("Posted!"));
+			assertTrue(Files.isRegularFile(shot.file), "das gepostete Foto bleibt");
+			ui.dispose();
+			assertTrue(Files.isRegularFile(shot.file), "auch nach dem Wegstecken");
+			assertEquals(feedBefore + 1, new LocalReelsBackend(tmp, UTC).feed().size(), "der Post ist gesichert");
+		}
+	}
+
+	@Test
+	void firstPostEverStartsTheStreakAtOne() {
+		PhoneUi ui = camera(PhoneHold.PORTRAIT);
+		assertEquals(0, backend.streak(NOON));
+		shoot(ui);
+		assertTrue(frame(ui).shows(I18n.tr("reels.compose.streak", 0, 1)));
+		click(ui, "composePost");
+		assertEquals(1, backend.feed().size());
+		assertEquals(1, backend.streak(NOON));
+		assertEquals("", backend.feed().get(0).caption, "ohne Text geht auch");
+		assertEquals(I18n.tr("reels.toast.posted", 1), ui.testToast());
+		ui.dispose();
+	}
+
+	@Test
+	void selfieSwitchesByLabelFlipButtonTabAndFAndMarksThePost() {
+		PhoneUi ui = camera(PhoneHold.PORTRAIT);
+		assertFalse(ui.selfieActive(), "die Kamera startet auf „Foto“");
+		assertFalse(ui.testSelfie());
+		click(ui, "camSelfie");
+		assertTrue(ui.selfieActive());
+		// Die gewählte Art ist gelb hinterlegt.
+		RecCanvas c = frame(ui);
+		int[] on = ui.testSpot("camSelfie");
+		RecCanvas.Fill amber = fillOf(c, CameraView.MODE_ON, true);
+		assertNotNull(amber);
+		assertEquals(on[0], amber.x1, 0.01);
+		assertEquals(on[1], amber.y1, 0.01);
+		click(ui, "camPhoto");
+		assertFalse(ui.selfieActive());
+		click(ui, "camFlip");
+		assertTrue(ui.selfieActive(), "„Kamera wechseln“ schaltet um");
+		frame(ui);
+		ui.keyPressed(0, UiKey.TAB, false);
+		assertFalse(ui.selfieActive(), "Tab schaltet um");
+		host.down.clear();
+		ui.keyPressed('F', UiKey.NONE, false);
+		assertTrue(ui.selfieActive(), "F schaltet um");
+		frame(ui);
+
+		// Nur in der Kamera dreht das Spiel die Kamera um: nicht in „Neuer Post“, nicht im Feed, nicht nach dem Wegstecken.
+		Reels.Shot shot = shoot(ui);
+		assertTrue(shot.selfie);
+		assertFalse(ui.selfieActive(), "„Neuer Post“: die Kamera des Spiels schaut wieder normal");
+		assertTrue(frame(ui).shows(I18n.tr("reels.camera.selfie")), "der Kopf nennt die Art des Fotos");
+		ui.keyPressed(0, UiKey.ENTER, false);
+		assertTrue(backend.feed().get(0).selfie);
+		assertFalse(ui.selfieActive());
+		frame(ui);
+		click(ui, "camera");
+		assertTrue(ui.selfieActive(), "die Kamera merkt sich „Selfie“, solange das Handy draußen ist");
+		ui.keyPressed(0, UiKey.ESCAPE, false);
+		assertFalse(ui.selfieActive());
+		frame(ui);
+		click(ui, "camera");
+		ui.dispose();
+		assertFalse(ui.selfieActive(), "weggesteckt: nie Selfie");
+	}
+
+	@Test
+	void retryAndEscapeDeleteThePhotoAndGoBackToTheCamera() {
+		PhoneUi ui = camera(PhoneHold.LANDSCAPE);
+		Reels.Shot first = shoot(ui);
+		frame(ui);
+		click(ui, "composeRetry");
+		assertEquals(PhoneUi.View.CAMERA, ui.testView());
+		assertFalse(Files.exists(first.file), "„Nochmal“ löscht das Foto");
+		assertNull(ui.testShot());
+		assertFalse(store.live.contains(PhoneUi.PREVIEW_TEXTURE));
+		frame(ui);
+
+		Reels.Shot second = shoot(ui);
+		for (char ch : "weg damit".toCharArray()) ui.inputChar(ch);
+		assertTrue(ui.keyPressed(0, UiKey.ESCAPE, false));
+		assertEquals(PhoneUi.View.CAMERA, ui.testView(), "Esc: zurück zur Kamera, nicht aus dem Handy");
+		assertFalse(Files.exists(second.file));
+		frame(ui);
+
+		Reels.Shot third = shoot(ui);
+		assertEquals("", ui.testCaption(), "der alte Text ist weg");
+		ui.keyPressed(0, UiKey.TAB, false);
+		assertEquals(PhoneUi.View.CAMERA, ui.testView(), "Tab = Nochmal");
+		assertFalse(Files.exists(third.file));
+		assertTrue(backend.feed().isEmpty(), "nichts wurde gepostet");
+		ui.dispose();
+	}
+
+	@Test
+	void puttingThePhoneAwayDeletesAnUnpostedPhotoAndFreesTheCameraTextures() {
+		PhoneUi ui = camera(PhoneHold.PORTRAIT);
+		frame(ui);
+		assertTrue(store.live.contains(PhoneUi.FINDER_TEXTURE));
+		Reels.Shot shot = shoot(ui);
+		frame(ui);
+		assertTrue(store.live.contains(PhoneUi.PREVIEW_TEXTURE));
+		ui.dispose();
+		assertFalse(Files.exists(shot.file), "nicht gepostet: das Foto bleibt nicht liegen");
+		assertTrue(store.live.isEmpty(), "alle Texturen frei: " + store.live);
+		assertTrue(backend.feed().isEmpty());
+
+		// Weggesteckt, während das Foto noch gespeichert wird: das nächste Handy räumt es weg.
+		PhoneUi busy = camera(PhoneHold.PORTRAIT);
+		click(busy, "camShutter");
+		frame(busy);
+		busy.dispose();
+		Reels.Shot late = reels.pollShot();
+		assertNotNull(late, "das Foto wurde noch fertig gespeichert");
+		assertTrue(Files.isRegularFile(late.file));
+		reels.savePhoto(new int[16 * 9], 16, 9, PhoneHold.LANDSCAPE, false, null);
+		PhoneUi next = ui(PhoneHold.PORTRAIT);
+		assertNull(reels.pollShot(), "das neue Handy hat liegengebliebene Fotos abgeholt");
+		assertEquals(PhoneUi.View.FEED, next.testView());
+		next.dispose();
+	}
+
+	@Test
+	void cameraStaysUsableWhenNoFrameArrivesOrSavingFails() {
+		PhoneUi ui = camera(PhoneHold.LANDSCAPE);
+		host.frames = false;
+		click(ui, "camShutter");
+		assertTrue(ui.testBusy());
+		int clicks = host.clicks;
+		click(ui, "camShutter");
+		assertEquals(clicks, host.clicks, "während der Aufnahme löst der Knopf nicht noch einmal aus");
+		assertEquals(1, host.requests(true));
+		ui.testTicker += PhoneUi.FRAME_TIMEOUT_MS - 100;
+		frame(ui);
+		assertTrue(ui.testBusy());
+		assertNull(ui.testToast());
+		ui.testTicker += 200;
+		RecCanvas c = frame(ui);
+		assertFalse(ui.testBusy(), "nach zwei Sekunden ohne Bild ist die Kamera wieder frei");
+		assertEquals(I18n.tr("reels.toast.failed"), ui.testToast());
+		assertEquals(PhoneUi.View.CAMERA, ui.testView());
+		assertNotNull(ui.testSpot("toast"));
+		assertTrue(c.shows("could not be saved") || c.shows("photo"), c.strings().toString());
+
+		// Speichern schlägt fehl (kein Foto-Ordner): Meldung, Kamera bleibt.
+		host.frames = true;
+		Reels.forTest(modules, new LocalReelsBackend(null, UTC), DIRECT, UTC);
+		PhoneUi broken = new PhoneUi(Reels.get(), host);
+		broken.testNow = NOON;
+		broken.testTicker = 1000;
+		frame(broken);
+		broken.openCamera();
+		frame(broken);
+		broken.shutter();
+		frame(broken);
+		frame(broken);
+		assertEquals(PhoneUi.View.CAMERA, broken.testView());
+		assertEquals(I18n.tr("reels.toast.failed"), broken.testToast());
+		assertFalse(broken.testBusy());
+		broken.dispose();
+		ui.dispose();
+	}
+
+	@Test
+	void draggingTheViewfinderAndArrowKeysTurnTheView() {
+		PhoneUi ui = camera(PhoneHold.LANDSCAPE);
+		int[] v = ui.testSpot("viewfinder");
+		double gx = (v[0] + v[2] * 0.3) / host.gui, gy = (v[1] + v[3] * 0.5) / host.gui;
+		assertTrue(ui.inputClick(gx, gy, 0));
+		assertEquals(0, host.turns, "der Druck allein dreht nichts");
+		assertTrue(ui.inputDrag(gx + 50, gy + 10, 0));
+		// 50 GUI-Einheiten = 100 Fensterpixel bei GUI 2.
+		assertEquals(100 * PhoneUi.LOOK_DEG_PER_PX, host.yaw, 1e-3);
+		assertEquals(20 * PhoneUi.LOOK_DEG_PER_PX, host.pitch, 1e-3);
+		ui.inputDrag(gx + 50, gy - 10, 0);
+		assertEquals(-20 * PhoneUi.LOOK_DEG_PER_PX, host.pitch, 1e-3);
+		ui.inputRelease(gx + 50, gy - 10, 0);
+		// Neuer Druck an anderer Stelle: kein Sprung.
+		float yaw = host.yaw;
+		ui.inputClick(gx + 200, gy, 0);
+		assertEquals(yaw, host.yaw, 1e-6);
+		ui.inputRelease(gx + 200, gy, 0);
+		// Ein Klick auf einen Knopf dreht nichts.
+		int turns = host.turns;
+		click(ui, "camFlip");
+		assertEquals(turns, host.turns);
+
+		host.yaw = 0;
+		host.pitch = 0;
+		ui.keyPressed(0, UiKey.RIGHT, false);
+		ui.keyPressed(0, UiKey.RIGHT, false);
+		ui.keyPressed(0, UiKey.LEFT, false);
+		ui.keyPressed(0, UiKey.DOWN, false);
+		assertEquals(PhoneUi.LOOK_DEG_PER_KEY, host.yaw, 1e-6);
+		assertEquals(PhoneUi.LOOK_DEG_PER_KEY, host.pitch, 1e-6);
+		assertEquals(0, ui.testPage(), "in der Kamera blättern die Pfeile nicht");
+		// Die Handy-Taste steckt auch aus der Kamera weg, die Drehen-Taste dreht.
+		ui.keyPressed('R', UiKey.NONE, false);
+		assertEquals(PhoneHold.PORTRAIT, ui.testHold());
+		assertEquals(PhoneUi.View.CAMERA, ui.testView());
+		frame(ui);
+		ui.keyPressed('H', UiKey.NONE, false);
+		assertTrue(ui.isClosing());
+		ui.dispose();
+	}
+
+	/** Ist die Mitte des Auslösers gelb (Aufnahme läuft)? */
+	private static boolean busyShutter(RecCanvas c, PhoneUi ui) {
+		int[] r = ui.testSpot("camShutter");
+		for (RecCanvas.Fill f : c.fills) {
+			if (f.argb == CameraView.SHUTTER_BUSY && f.x1 >= r[0] && f.y1 >= r[1] && f.x2 <= r[0] + r[2] && f.y2 <= r[1] + r[3]) return true;
+		}
+		return false;
+	}
+
+	@Test
+	void shutterFlashesAndTheButtonShowsThatItIsBusy() {
+		PhoneUi ui = camera(PhoneHold.PORTRAIT);
+		host.frames = false;
+		RecCanvas idle = frame(ui);
+		assertFalse(busyShutter(idle, ui), "Auslöser in Ruhe: weiß");
+		click(ui, "camShutter");
+		RecCanvas c = frame(ui);
+		assertTrue(busyShutter(c, ui), "Auslöser während der Aufnahme: gelb");
+		// Auch die Leertaste löst aus – aber nicht noch einmal, solange die Aufnahme läuft.
+		ui.keyPressed(' ', UiKey.NONE, false);
+		assertEquals(1, host.requests(true));
+		int[] s = ui.testSpot("screen");
+		boolean flash = false;
+		for (RecCanvas.Fill f : c.fills) {
+			flash |= (f.argb & 0xFFFFFF) == 0xFFFFFF && (f.argb >>> 24) > 100 && (f.argb >>> 24) < 255 && f.x2 - f.x1 == s[2]
+					&& f.y2 - f.y1 == s[3];
+		}
+		assertTrue(flash, "weißer Blitz über dem Sucher");
+		ui.testTicker += PhoneUi.FLASH_MS;
+		c = frame(ui);
+		for (RecCanvas.Fill f : c.fills) {
+			assertFalse((f.argb & 0xFFFFFF) == 0xFFFFFF && (f.argb >>> 24) < 255 && (f.argb >>> 24) > 100 && f.x2 - f.x1 == s[2]
+					&& f.y2 - f.y1 == s[3], "der Blitz ist vorbei");
+		}
+		// Gestufte Scheibe: nichts überlappt, oben und unten gespiegelt.
+		RecCanvas disc = new RecCanvas(1);
+		CameraView.disc(disc, 10, 20, 96, new int[]{24, 16, 8}, 8, 0xFFFFFFFF);
+		assertEquals(7, disc.fills.size());
+		double area = 0;
+		for (RecCanvas.Fill f : disc.fills) area += (f.x2 - f.x1) * (f.y2 - f.y1);
+		assertEquals(96 * 96 - 4 * (24 * 8 + 16 * 8 + 8 * 8), area, 1e-6);
+		assertEquals(disc.fills.get(0).x1, disc.fills.get(6).x1, 1e-6);
+		assertEquals(20 + 96, disc.fills.get(6).y2, 1e-6);
+		ui.dispose();
 	}
 
 	@Test

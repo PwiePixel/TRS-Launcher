@@ -2755,6 +2755,7 @@
   "reels.compose.retry": "Jeszcze raz",
   "reels.compose.post": "Opublikuj",
   "reels.compose.streak": "Seria: {0} → {1} dni",
+  "reels.compose.streak.same": "Seria: {0} dni",
   "reels.compose.local": "Na razie zostaje na tym komputerze.",
   "reels.toast.posted": "Opublikowano! Seria: {0} dni",
   "reels.toast.failed": "Nie udało się zapisać zdjęcia."

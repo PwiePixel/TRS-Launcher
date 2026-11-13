@@ -258,8 +258,9 @@ if (stonecutter.eval(mc, '>=1.21.2')) mixinClasses << 'EmoteStateMixin'
 if (stonecutter.eval(mc, '>=1.16') && stonecutter.eval(mc, '<26.2')) mixinClasses << 'FanTextMixin'
 if (stonecutter.eval(mc, '>=1.16')) mixinClasses << 'FanGuiMixin'
 if (stonecutter.eval(mc, '>=26.2')) mixinClasses << 'FanNameTagMixin'
-// MC-Reels (erste Testversion, vorerst nur 26.2): solange das Handy draußen ist, keine Spielerhand und kein Block-Umriss.
-if (stonecutter.eval(mc, '>=26.2') && stonecutter.eval(mc, '<26.3')) mixinClasses << 'ReelsRenderMixin'
+// MC-Reels (erste Testversion, vorerst nur 26.2): solange das Handy draußen ist, keine Spielerhand und kein Block-Umriss;
+// Bild der Welt ohne Oberfläche für die Kamera des Handys; Selfie (Kamera vor dem Gesicht).
+if (stonecutter.eval(mc, '>=26.2') && stonecutter.eval(mc, '<26.3')) mixinClasses += ['ReelsRenderMixin', 'ReelsCameraMixin']
 // Welt-Hosting: Gast über eigenen Netty-Kanal (Marker-Adresse), Host öffnet ohne TCP/LAN, Spielergrenze ≤ 10.
 mixinClasses += ['HostingConnectMixin', 'HostingPublishMixin', 'HostingPingerMixin', 'HostingServerAccessor']
 mixinClasses << (stonecutter.eval(mc, '>=1.21.9') ? 'HostingPlayerListMixin' : 'HostingPlayerListAccessor')

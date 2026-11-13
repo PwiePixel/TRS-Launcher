@@ -218,6 +218,14 @@ public final class LocalReelsBackend implements ReelsBackend {
 	}
 
 	@Override
+	public synchronized int streakAfterPost(long now) {
+		long today = ReelsTime.epochDay(now, zone.getOffset(now));
+		List<Long> days = new ArrayList<Long>(postDays);
+		days.add(Long.valueOf(today));
+		return ReelsTime.streak(days, today);
+	}
+
+	@Override
 	public Path photoFile(ReelsPost post) {
 		if (dir == null || post == null || !ReelsPost.validPhotoName(post.photo)) return null;
 		return dir.resolve(PHOTOS).resolve(post.photo);

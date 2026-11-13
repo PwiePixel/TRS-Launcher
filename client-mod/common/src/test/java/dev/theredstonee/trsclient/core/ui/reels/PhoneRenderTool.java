@@ -262,9 +262,33 @@ class PhoneRenderTool {
 			@Override public String keyLabel(String keyName) { return keyName.substring(keyName.lastIndexOf('.') + 1).toUpperCase(); }
 			@Override public String paste() { return null; }
 			@Override public void click() { }
+			@Override public void turn(float yawDeg, float pitchDeg) { }
+			@Override public void requestFrame(boolean photo, int needW, int needH) { pending = Boolean.valueOf(photo); }
+			@Override public PhoneUi.Frame pollFrame() {
+				Boolean photo = pending;
+				pending = null;
+				if (photo == null) return null;
+				// Das „Spiel“ ohne Oberfläche: das Hintergrundbild in Fenstergröße.
+				BufferedImage img = new BufferedImage(w, h, BufferedImage.TYPE_INT_RGB);
+				Graphics2D g = img.createGraphics();
+				if (world != null) g.drawImage(world, 0, 0, w, h, null);
+				else {
+					g.setColor(new Color(0x6FA8DC));
+					g.fillRect(0, 0, w, h);
+					g.setColor(new Color(0x58B04A));
+					g.fillRect(0, h * 6 / 10, w, h);
+				}
+				g.dispose();
+				return new PhoneUi.Frame(img.getRGB(0, 0, w, h, null, 0, w), w, h, photo.booleanValue());
+			}
 			@Override public void close() { }
 		};
 	}
+
+	/** Angeforderte Art des nächsten Bilds (Foto?) oder null. */
+	private static Boolean pending;
+	/** Bild der „Welt“ für die Kamera. */
+	private static BufferedImage world;
 
 	@Test
 	void render() throws Exception {
@@ -329,6 +353,17 @@ class PhoneRenderTool {
 				shot(reels, modules, bg, out, "kommentare-quer", 1920, 1080, 2, PhoneHold.LANDSCAPE, slim, true);
 				shot(reels, modules, bg, out, "kommentare-hochkant", 1920, 1080, 2, PhoneHold.PORTRAIT, slim, true);
 				shot(reels, modules, bg, out, "kommentare-hochkant-854", 854, 480, 1, PhoneHold.PORTRAIT, slim, true);
+				// Kamera und „Neuer Post“.
+				world = bg;
+				int[][] camSizes = {{1920, 1080, 2}, {854, 480, 1}, {800, 1000, 2}};
+				for (int[] s : camSizes) {
+					for (PhoneHold hold : PhoneHold.values()) {
+						String tag = (hold == PhoneHold.LANDSCAPE ? "quer" : "hochkant") + "-" + s[0] + "x" + s[1];
+						cameraShot(reels, modules, bg, out, "kamera-" + tag, s[0], s[1], s[2], hold, slim, false, false);
+						cameraShot(reels, modules, bg, out, "kamera-selfie-" + tag, s[0], s[1], s[2], hold, slim, true, false);
+						cameraShot(reels, modules, bg, out, "posten-" + tag, s[0], s[1], s[2], hold, slim, false, true);
+					}
+				}
 				// Zweiter Post (anders ausgerichtet): eingepasst statt beschnitten.
 				if (files.length > 1) {
 					pageShot(reels, modules, bg, out, "seite2-quer", PhoneHold.LANDSCAPE, slim);
@@ -348,6 +383,33 @@ class PhoneRenderTool {
 		PhoneUi ui = new PhoneUi(reels, host(w, h, gui, slim));
 		if (comments) ui.keyPressed(0, UiKey.ENTER, false);
 		write(ui, bg, out, name, w, h, gui);
+	}
+
+	/** Kamera öffnen (wahlweise Selfie), wahlweise auslösen und einen Text tippen; dann das Bild schreiben. */
+	private void cameraShot(Reels reels, TrsModules modules, BufferedImage bg, Path out, String name, int w, int h, int gui,
+			PhoneHold hold, boolean slim, boolean selfie, boolean compose) throws Exception {
+		modules.reels.hold.set(hold);
+		PhoneUi ui = new PhoneUi(reels, host(w, h, gui, slim));
+		pump(ui, w, h, gui, 1);
+		ui.openCamera();
+		pump(ui, w, h, gui, 2);
+		if (selfie) ui.setSelfie(true);
+		if (compose) {
+			ui.shutter();
+			pump(ui, w, h, gui, 3);
+			for (char ch : "Aussicht hinter meiner Basis".toCharArray()) ui.inputChar(ch);
+		}
+		write(ui, bg, out, name, w, h, gui);
+	}
+
+	private void pump(PhoneUi ui, int w, int h, int gui, int frames) {
+		for (int i = 0; i < frames; i++) {
+			AwtCanvas c = new AwtCanvas(w, h, textures);
+			c.g.scale(gui, gui);
+			ui.testOpenFully();
+			ui.render(c, w / gui, h / gui, -1, -1);
+			c.g.dispose();
+		}
 	}
 
 	private void pageShot(Reels reels, TrsModules modules, BufferedImage bg, Path out, String name, PhoneHold hold, boolean slim)

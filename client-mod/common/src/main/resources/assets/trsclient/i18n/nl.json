@@ -2755,6 +2755,7 @@
   "reels.compose.retry": "Opnieuw",
   "reels.compose.post": "Posten",
   "reels.compose.streak": "Streak: {0} → {1} dagen",
+  "reels.compose.streak.same": "Streak: {0} dagen",
   "reels.compose.local": "Blijft voorlopig op deze pc.",
   "reels.toast.posted": "Gepost! Streak: {0} dagen",
   "reels.toast.failed": "De foto kon niet worden opgeslagen."

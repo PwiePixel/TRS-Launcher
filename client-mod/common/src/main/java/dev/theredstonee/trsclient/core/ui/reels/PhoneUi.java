@@ -9,13 +9,16 @@ import dev.theredstonee.trsclient.core.reels.ArmRig;
 import dev.theredstonee.trsclient.core.reels.FeedPager;
 import dev.theredstonee.trsclient.core.reels.PhoneHold;
 import dev.theredstonee.trsclient.core.reels.PhoneLayout;
+import dev.theredstonee.trsclient.core.reels.PhotoFrame;
 import dev.theredstonee.trsclient.core.reels.Reels;
 import dev.theredstonee.trsclient.core.reels.ReelsComment;
 import dev.theredstonee.trsclient.core.reels.ReelsPost;
 import dev.theredstonee.trsclient.core.ui.Canvas;
 import dev.theredstonee.trsclient.core.ui.FadeCanvas;
+import dev.theredstonee.trsclient.core.ui.Hits;
 import dev.theredstonee.trsclient.core.ui.TextInput;
 import dev.theredstonee.trsclient.core.ui.TextureRef;
+import dev.theredstonee.trsclient.core.ui.Textures;
 import dev.theredstonee.trsclient.core.ui.UiKey;
 import dev.theredstonee.trsclient.core.ui.UiScreen;
 
@@ -24,6 +27,7 @@ import java.util.Calendar;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.RejectedExecutionException;
 
 /**
  * Das Handy im Spiel (MC-Reels): zwei gezeichnete Arme halten ein Handy, auf dem der Foto-Feed läuft. Versionsunabhängig
@@ -34,12 +38,20 @@ import java.util.Map;
  * die Arme laufen immer unten aus dem Bild.
  *
  * <p>Reihenfolge: Schleier über dem Spiel, Arme (aus dem Skin, Innenseite vor Vorderseite), Schatten und Gehäuse, dann
- * der Bildschirm ({@link FeedView}). Ansichten in diesem Stand: Feed und Kommentare; „Handy drehen“ wechselt zwischen
- * quer und hochkant und merkt sich die Haltung.
+ * der Bildschirm. Ansichten: Feed und Kommentare ({@link FeedView}), Kamera mit „Foto“ und „Selfie“
+ * ({@link CameraView}) und „Neuer Post“ mit Text ({@link ComposeView}). „Handy drehen“ wechselt zwischen quer und
+ * hochkant und merkt sich die Haltung.
  *
- * <p><b>Aufräumen:</b> {@link #dispose()} gibt die Texturen frei, sperrt die Handy-Taste bis zum Loslassen und sichert
- * den Feed. Es läuft nach der Schließ-Animation und muss vom Baum zusätzlich gerufen werden, wenn der Bildschirm anders
- * verschwindet (Tod, Verbindung getrennt) – mehrfach rufen schadet nicht.
+ * <p><b>Kamera:</b> der Baum liefert Bilder der Welt <i>ohne</i> Oberfläche ({@link Host#requestFrame} /
+ * {@link Host#pollFrame}) – auf einem Foto sind deshalb nie HUD, Chat, Handy oder Arme. Etwa sechsmal je Sekunde kommt
+ * ein Bild für den Sucher; es wird im Hintergrund ({@link Reels#worker()}) auf die Größe des Suchers gebracht (nie
+ * vergrößert) und hier nur noch hochgeladen. Der Auslöser fordert ein Bild in voller Auflösung an, das
+ * {@link Reels#savePhoto} zuschneidet und als PNG speichert; danach öffnet sich „Neuer Post“. „Nochmal“ und Esc
+ * löschen das Foto wieder, „Posten“ stellt es vorn in den Feed.
+ *
+ * <p><b>Aufräumen:</b> {@link #dispose()} gibt die Texturen frei, löscht ein nicht gepostetes Foto, sperrt die
+ * Handy-Taste bis zum Loslassen und sichert den Feed. Es läuft nach der Schließ-Animation und muss vom Baum zusätzlich
+ * gerufen werden, wenn der Bildschirm anders verschwindet (Tod, Verbindung getrennt) – mehrfach rufen schadet nicht.
  */
 public final class PhoneUi extends UiScreen {
 	/** Anbindung an den Baum (Minecraft). Alle Aufrufe im Render-/Spiel-Thread. */
@@ -78,14 +90,60 @@ public final class PhoneUi extends UiScreen {
 		/** Klick-Ton. */
 		void click();
 
+		/** Blick des Spielers drehen (Kamera des Handys): Grad nach rechts bzw. nach unten. */
+		void turn(float yawDeg, float pitchDeg);
+
+		/**
+		 * Das nächste Bild der Welt anfordern – ohne Oberfläche (kein HUD, kein Chat, kein Handy, keine Arme). Für ein
+		 * Foto ({@code photo}) in voller Auflösung. Sonst für den Sucher, der {@code needW}×{@code needH} Fensterpixel
+		 * groß ist: der Baum darf beim Auslesen verkleinern, solange der mittige Ausschnitt in diesem Seitenverhältnis
+		 * mindestens so groß bleibt ({@link PhotoFrame#readbackFactor}). Eine neue Anforderung derselben Art ersetzt eine
+		 * noch nicht bediente.
+		 */
+		void requestFrame(boolean photo, int needW, int needH);
+
+		/** Das nächste fertige Bild oder null, solange keines da ist. */
+		Frame pollFrame();
+
 		/** Bildschirm wirklich schließen (nach der Animation). */
 		void close();
+	}
+
+	/** Ein Bild der Welt ohne Oberfläche: ARGB, Zeilen von oben. */
+	public static final class Frame {
+		public final int[] argb;
+		public final int width;
+		public final int height;
+		/** Für ein Foto angefordert (sonst für den Sucher). */
+		public final boolean photo;
+
+		public Frame(int[] argb, int width, int height, boolean photo) {
+			this.argb = argb;
+			this.width = width;
+			this.height = height;
+			this.photo = photo;
+		}
 	}
 
 	/** Was der Bildschirm des Handys zeigt. */
 	public enum View {
 		FEED,
-		COMMENTS
+		COMMENTS,
+		CAMERA,
+		COMPOSE
+	}
+
+	/** Fertig gerechnetes Bild für den Sucher (kommt aus dem Hintergrund-Thread). */
+	private static final class Finder {
+		final int[] argb;
+		final int width;
+		final int height;
+
+		Finder(int[] argb, int width, int height) {
+			this.argb = argb;
+			this.width = width;
+			this.height = height;
+		}
 	}
 
 	/** So weit (Anteil der Fensterhöhe) kommen Arme und Handy beim Öffnen von unten herauf. */
@@ -93,12 +151,32 @@ public final class PhoneUi extends UiScreen {
 	/** Fotos im Feed: höchstens so groß geladen (längste Seite), so viele zugleich. */
 	static final int PHOTO_MAX = 1024;
 	static final int PHOTO_CACHE = 6;
+	/** Sucher: so oft kommt ein neues Bild (Millisekunden) – etwa sechsmal je Sekunde. */
+	static final long FINDER_INTERVAL_MS = 160L;
+	/** Kommt so lange kein angefordertes Bild, gilt die Anforderung als verloren. */
+	static final long FRAME_TIMEOUT_MS = 2000L;
+	/** So lange darf das Speichern eines Fotos dauern, bevor die Kamera wieder frei ist. */
+	static final long SAVE_TIMEOUT_MS = 15000L;
+	/** Dauer des weißen Blitzes nach dem Auslösen und der Meldung auf dem Handy. */
+	static final long FLASH_MS = 220L;
+	static final long TOAST_MS = 3500L;
+	/** Blick drehen: Grad je Fensterpixel beim Ziehen und Grad je Pfeiltasten-Druck. */
+	static final float LOOK_DEG_PER_PX = 0.09f;
+	static final float LOOK_DEG_PER_KEY = 5f;
+	static final String FINDER_TEXTURE = "reels/viewfinder";
+	static final String PREVIEW_TEXTURE = "reels/preview";
+	private static final int FINDER_IDLE = 0;
+	private static final int FINDER_REQUESTED = 1;
+	private static final int FINDER_WORKING = 2;
+	private static final Finder FINDER_FAILED = new Finder(null, 0, 0);
 
 	private final Reels reels;
 	private final Host host;
 	private final TrsModules modules;
 	private final FeedPager pager = new FeedPager();
 	private final FeedView feedView = new FeedView(this);
+	private final CameraView cameraView = new CameraView(this);
+	private final ComposeView composeView = new ComposeView(this);
 	private final PhoneVeil veil = new PhoneVeil();
 	private final PhoneShadow shadow = new PhoneShadow();
 	private final Map<String, int[]> spots = new HashMap<String, int[]>();
@@ -106,6 +184,34 @@ public final class PhoneUi extends UiScreen {
 	final TextInput commentInput = new TextInput(ReelsComment.MAX_TEXT);
 	/** Wie viele Kommentare das Blatt zuletzt gezeigt hat (Tests). */
 	int commentsShown;
+	/** Eingabefeld für den Text zum Foto („Neuer Post“). */
+	final TextInput captionInput = new TextInput(ReelsPost.MAX_CAPTION);
+
+	// --- Kamera ---
+	private boolean selfie;
+	private TextureRef finderTexture;
+	private int finderState = FINDER_IDLE;
+	private long finderSince;
+	private long finderLast = Long.MIN_VALUE / 2;
+	private volatile Finder finderReady;
+	/** Auslöser gedrückt: das Bild in voller Auflösung ist angefordert. */
+	private boolean shutterPending;
+	private long shutterAt;
+	private boolean shutterSelfie;
+	private PhoneHold shutterHold;
+	/** Das Foto wird gerade im Hintergrund gespeichert. */
+	private boolean saving;
+	private long savingSince;
+	private long flashAt = Long.MIN_VALUE / 2;
+	/** Das aufgenommene, noch nicht gepostete Foto („Neuer Post“). */
+	private Reels.Shot shot;
+	private TextureRef previewTexture;
+	/** Beim Ziehen im Sucher: letzte Mausposition (Fensterpixel). */
+	private double lookX, lookY;
+	private boolean lookStart;
+	// --- Meldung auf dem Handy ---
+	private String toast;
+	private long toastUntil;
 
 	private Thumbnails photos;
 	private PhoneHold hold;
@@ -125,6 +231,8 @@ public final class PhoneUi extends UiScreen {
 	private int armBlits;
 	/** Tests: feste Uhrzeit (0 = echte Uhr). */
 	long testNow;
+	/** Tests: fester Taktgeber in Millisekunden für Sucher, Blitz und Meldung (0 = echte Uhr). */
+	long testTicker;
 
 	public PhoneUi(Reels reels, Host host) {
 		if (reels == null || host == null) throw new IllegalArgumentException("reels/host");
@@ -134,6 +242,10 @@ public final class PhoneUi extends UiScreen {
 		PhoneHold saved = modules.reels.hold.get();
 		this.hold = saved != null ? saved : PhoneHold.LANDSCAPE;
 		I18n.refresh();
+		// Fotos, die noch für ein früheres Handy gespeichert wurden (weggesteckt, bevor sie fertig waren): niemand
+		// postet sie mehr.
+		Reels.Shot stale;
+		while ((stale = reels.pollShot()) != null) reels.discard(stale);
 	}
 
 	// --- Zeichnen ---
@@ -156,6 +268,7 @@ public final class PhoneUi extends UiScreen {
 		PhoneLayout l = layout;
 		refreshFeed();
 		if (photos != null) photos.frame();
+		cameraTick(l, raw.images());
 
 		// Ab hier ist eine Einheit ein Fensterpixel – die GUI-Skalierung spielt keine Rolle mehr.
 		raw.push();
@@ -175,7 +288,10 @@ public final class PhoneUi extends UiScreen {
 				PhoneBody.draw(c, l);
 				spot("phone", l.phoneX, l.phoneY, l.phoneW, l.phoneH);
 				spot("screen", l.screenX, l.screenY, l.screenW, l.screenH);
-				feedView.draw(c, l);
+				if (view == View.CAMERA) cameraView.draw(c, l);
+				else if (view == View.COMPOSE) composeView.draw(c, l);
+				else feedView.draw(c, l);
+				drawToast(c, l);
 			} finally {
 				c.pop();
 			}
@@ -345,13 +461,330 @@ public final class PhoneUi extends UiScreen {
 		}
 	}
 
-	/** „Feed“ in der Leiste: zurück zum Feed (schließt die Kommentare). */
+	/** „Feed“ in der Leiste: zurück zum Feed (schließt die Kommentare bzw. die Kamera). */
 	void home() {
 		closeComments();
+		closeCamera();
 	}
 
-	/** Kamera öffnen – die Kamera-Ansicht kommt mit dem nächsten Bauschritt; bis dahin tut der Knopf nichts. */
+	// --- Kamera ---
+
+	/** Kamera öffnen (aus dem Feed). */
 	void openCamera() {
+		if (disposed || view == View.CAMERA || view == View.COMPOSE) return;
+		closeComments();
+		view = View.CAMERA;
+		finderState = FINDER_IDLE;
+		finderReady = null;
+		// Das erste Bild sofort anfordern.
+		finderLast = Long.MIN_VALUE / 2;
+		host.click();
+	}
+
+	/** Kamera verlassen, zurück zum Feed. Ein noch laufendes Foto verfällt. */
+	void closeCamera() {
+		if (view != View.CAMERA) return;
+		view = View.FEED;
+		shutterPending = false;
+		saving = false;
+		releaseFinder();
+	}
+
+	boolean selfie() {
+		return selfie;
+	}
+
+	void setSelfie(boolean on) {
+		if (view != View.CAMERA || selfie == on || busy()) return;
+		selfie = on;
+		// Der Sucher zeigt sofort die andere Richtung.
+		finderLast = Long.MIN_VALUE / 2;
+		host.click();
+	}
+
+	void toggleSelfie() {
+		setSelfie(!selfie);
+	}
+
+	/**
+	 * Zeigt die Kamera gerade auf den Spieler („Selfie“)? Der Baum dreht dann die Kamera des Spiels – für die Welt hinter
+	 * dem Handy, den Sucher und das Foto.
+	 */
+	public boolean selfieActive() {
+		return !disposed && view == View.CAMERA && selfie;
+	}
+
+	/** Wird gerade ein Foto aufgenommen oder gespeichert? (Der Auslöser ruht so lange.) */
+	boolean busy() {
+		return shutterPending || saving;
+	}
+
+	/** Auslöser: das nächste Bild der Welt wird zum Foto. */
+	void shutter() {
+		if (view != View.CAMERA || busy() || isClosing()) return;
+		long t = ticker();
+		shutterPending = true;
+		shutterAt = t;
+		shutterSelfie = selfie;
+		shutterHold = hold;
+		flashAt = t;
+		host.requestFrame(true, 0, 0);
+		host.click();
+	}
+
+	/** Wie stark der weiße Blitz nach dem Auslösen gerade ist (0…1). */
+	float flash() {
+		long age = ticker() - flashAt;
+		return age < 0 || age >= FLASH_MS ? 0f : 1f - age / (float) FLASH_MS;
+	}
+
+	/** Textur des Suchers oder null, solange noch kein Bild da ist. */
+	TextureRef viewfinder() {
+		return finderTexture;
+	}
+
+	/** Foto des neuesten Posts (kleines Bild neben dem Auslöser) oder null. */
+	TextureRef lastPhoto() {
+		if (disposed || feed == null || feed.isEmpty()) return null;
+		return load(feed.get(0));
+	}
+
+	/** Fläche des Suchers, auf der Ziehen den Blick dreht (unter allen Knöpfen). */
+	void lookArea(int x, int y, int w, int h) {
+		if (w <= 0 || h <= 0) return;
+		hits.addDrag(x, y, w, h, new Hits.Drag() {
+			@Override
+			public void to(double mouseX, double mouseY) {
+				if (lookStart) {
+					lookStart = false;
+				} else {
+					float dx = (float) (mouseX - lookX), dy = (float) (mouseY - lookY);
+					if (dx != 0f || dy != 0f) host.turn(dx * LOOK_DEG_PER_PX, dy * LOOK_DEG_PER_PX);
+				}
+				lookX = mouseX;
+				lookY = mouseY;
+			}
+		});
+	}
+
+	/**
+	 * Je Bild: fertige Fotos und Bilder des Spiels abholen, den Sucher hochladen und das nächste Sucherbild anfordern.
+	 * Bilder und Fotos, auf die niemand mehr wartet (Kamera verlassen), verfallen.
+	 */
+	private void cameraTick(PhoneLayout l, boolean images) {
+		long t = ticker();
+		Reels.Shot done;
+		while ((done = reels.pollShot()) != null) {
+			if (saving && view == View.CAMERA && shot == null) {
+				saving = false;
+				if (done.failed) toast(I18n.tr("reels.toast.failed"));
+				else compose(done);
+			} else {
+				reels.discard(done);
+			}
+		}
+		Frame f;
+		while ((f = host.pollFrame()) != null) {
+			if (f.photo) {
+				if (!shutterPending) continue;
+				shutterPending = false;
+				if (view != View.CAMERA || f.argb == null || f.width <= 0 || f.height <= 0) continue;
+				saving = true;
+				savingSince = t;
+				reels.savePhoto(f.argb, f.width, f.height, shutterHold, shutterSelfie, null);
+			} else if (view == View.CAMERA && finderState == FINDER_REQUESTED) {
+				scaleFinder(f, l.screenW, l.screenH);
+			}
+		}
+		if (shutterPending && t - shutterAt > FRAME_TIMEOUT_MS) {
+			// Der Baum hat kein Bild geliefert: die Kamera bleibt benutzbar.
+			shutterPending = false;
+			toast(I18n.tr("reels.toast.failed"));
+		}
+		if (saving && t - savingSince > SAVE_TIMEOUT_MS) {
+			saving = false;
+			toast(I18n.tr("reels.toast.failed"));
+		}
+		if (view != View.CAMERA) return;
+		Finder ready = finderReady;
+		if (ready != null) {
+			finderReady = null;
+			finderState = FINDER_IDLE;
+			Textures.Store store = Textures.store();
+			if (ready != FINDER_FAILED && images && store != null) {
+				try {
+					TextureRef tex = store.upload(FINDER_TEXTURE, ready.width, ready.height, ready.argb);
+					if (tex != null) finderTexture = tex;
+				} catch (RuntimeException e) {
+					// Sucher bleibt beim letzten Bild.
+				}
+			}
+		}
+		if (finderState != FINDER_IDLE && t - finderSince > FRAME_TIMEOUT_MS) finderState = FINDER_IDLE;
+		if (finderState == FINDER_IDLE && images && t - finderLast >= FINDER_INTERVAL_MS) {
+			finderLast = t;
+			finderSince = t;
+			finderState = FINDER_REQUESTED;
+			host.requestFrame(false, l.screenW, l.screenH);
+		}
+	}
+
+	/**
+	 * Sucherbild im Hintergrund zuschneiden (mittig, im Seitenverhältnis des Suchers) und auf die Größe des Suchers
+	 * bringen – nie größer als die Quelle.
+	 */
+	private void scaleFinder(final Frame f, final int needW, final int needH) {
+		finderState = FINDER_WORKING;
+		Runnable job = new Runnable() {
+			@Override
+			public void run() {
+				Finder out = FINDER_FAILED;
+				try {
+					int[] crop = PhotoFrame.cropRect(f.width, f.height, needW, needH);
+					int[] size = PhotoFrame.viewSize(crop[2], crop[3], needW, needH);
+					out = new Finder(PhotoFrame.render(f.argb, f.width, f.height, crop, size[0], size[1]), size[0], size[1]);
+				} catch (RuntimeException | OutOfMemoryError e) {
+					out = FINDER_FAILED;
+				}
+				finderReady = out;
+			}
+		};
+		try {
+			reels.worker().execute(job);
+		} catch (RejectedExecutionException e) {
+			finderReady = FINDER_FAILED;
+		}
+	}
+
+	private void releaseFinder() {
+		TextureRef t = finderTexture;
+		finderTexture = null;
+		finderReady = null;
+		finderState = FINDER_IDLE;
+		Textures.Store store = Textures.store();
+		if (t != null && store != null) store.release(t);
+	}
+
+	// --- Neuer Post ---
+
+	/** Das Foto ist gespeichert: „Neuer Post“ öffnen. */
+	private void compose(Reels.Shot done) {
+		shot = done;
+		view = View.COMPOSE;
+		captionInput.clear();
+		captionInput.setFocused(true);
+		releaseFinder();
+		Textures.Store store = Textures.store();
+		if (store != null && done.preview != null) {
+			try {
+				previewTexture = store.upload(PREVIEW_TEXTURE, done.previewW, done.previewH, done.preview);
+			} catch (RuntimeException e) {
+				previewTexture = null;
+			}
+		}
+	}
+
+	Reels.Shot shot() {
+		return shot;
+	}
+
+	/** Vorschau des aufgenommenen Fotos oder null. */
+	TextureRef preview() {
+		return previewTexture;
+	}
+
+	/** Streak jetzt und nach dem Posten: {vorher, nachher}. */
+	int[] streakChange() {
+		return new int[]{streak(), Math.max(0, reels.backend().streakAfterPost(now()))};
+	}
+
+	private void releasePreview() {
+		TextureRef t = previewTexture;
+		previewTexture = null;
+		Textures.Store store = Textures.store();
+		if (t != null && store != null) store.release(t);
+	}
+
+	/** „Nochmal“ (oder Esc): das Foto wieder löschen und zurück zur Kamera. */
+	void retry() {
+		if (view != View.COMPOSE) return;
+		Reels.Shot old = shot;
+		shot = null;
+		if (old != null) reels.discard(old);
+		releasePreview();
+		captionInput.clear();
+		captionInput.setFocused(false);
+		view = View.CAMERA;
+		finderLast = Long.MIN_VALUE / 2;
+		host.click();
+	}
+
+	/** „Posten“: das Foto steht danach vorn im Feed. */
+	void postShot() {
+		if (view != View.COMPOSE || shot == null) return;
+		ReelsPost posted = reels.post(shot, captionInput.text(), host.playerName(), now());
+		if (posted == null) {
+			toast(I18n.tr("reels.toast.failed"));
+			return;
+		}
+		shot = null;
+		releasePreview();
+		captionInput.clear();
+		captionInput.setFocused(false);
+		view = View.FEED;
+		refreshFeed();
+		pager.first();
+		// Die Streak sofort neu rechnen.
+		streakSecond = Long.MIN_VALUE;
+		toast(I18n.tr("reels.toast.posted", streak()));
+		host.click();
+	}
+
+	// --- Meldung auf dem Handy ---
+
+	/** Kurze Meldung oben auf dem Bildschirm des Handys („Gepostet!“). */
+	void toast(String text) {
+		toast = text;
+		toastUntil = ticker() + TOAST_MS;
+	}
+
+	private void drawToast(Canvas c, PhoneLayout l) {
+		if (toast == null) return;
+		if (ticker() >= toastUntil) {
+			toast = null;
+			return;
+		}
+		int m = PhoneText.scale(24, l.q);
+		int pad = Math.max(2, Math.round(12 * l.q));
+		int line = Math.max(1, Math.min(pad / 2, l.px(3)));
+		int side = Math.round(14 * l.q);
+		int max = l.screenW - 2 * side - 2 * pad;
+		List<String> lines = PhoneText.wrap(c, toast, m, max, 3);
+		if (lines.isEmpty()) return;
+		int lineH = (PhoneText.GLYPH_H + 2) * m;
+		int textW = 0;
+		for (String s : lines) textW = Math.max(textW, PhoneText.width(c, s, m));
+		int w = textW + 2 * pad;
+		int h = (lines.size() - 1) * lineH + PhoneText.height(m) + 2 * pad;
+		int x = l.screenX + (l.screenW - w) / 2;
+		int y = l.screenY + Math.round(44 * l.q);
+		if (y + h > l.screenY + l.screenH) y = l.screenY + Math.max(0, (l.screenH - h) / 2);
+		if (w > l.screenW || h > l.screenH) return;
+		c.fill(x, y, x + w, y + h, 0xF2111116);
+		c.fill(x, y, x + w, y + line, FeedView.AMBER);
+		c.fill(x, y + h - line, x + w, y + h, FeedView.AMBER);
+		c.fill(x, y + line, x + line, y + h - line, FeedView.AMBER);
+		c.fill(x + w - line, y + line, x + w, y + h - line, FeedView.AMBER);
+		for (int i = 0; i < lines.size(); i++) {
+			String s = lines.get(i);
+			PhoneText.draw(c, s, x + (w - PhoneText.width(c, s, m)) / 2, y + pad + i * lineH, m, FeedView.WHITE, false);
+		}
+		spot("toast", x, y, w, h);
+	}
+
+	/** Taktgeber für Sucher, Blitz und Meldung (Millisekunden, läuft nur vorwärts). */
+	long ticker() {
+		return testTicker != 0 ? testTicker : System.nanoTime() / 1000000L;
 	}
 
 	/** Handy drehen (quer ↔ hochkant); die Haltung wird gemerkt. */
@@ -371,6 +804,7 @@ public final class PhoneUi extends UiScreen {
 	public boolean mouseClicked(double mouseX, double mouseY, int button) {
 		// Während das Handy verschwindet, zählen keine Klicks mehr.
 		if (isClosing()) return true;
+		lookStart = true;
 		return hits.click(mouseX * guiScale, mouseY * guiScale, button);
 	}
 
@@ -401,6 +835,19 @@ public final class PhoneUi extends UiScreen {
 			}
 			return true;
 		}
+		if (view == View.COMPOSE) {
+			// Auch hier ein Textfeld: Enter postet, Esc und Tab verwerfen das Foto („Nochmal“).
+			if (key == UiKey.ENTER) {
+				postShot();
+			} else if (key == UiKey.ESCAPE || key == UiKey.TAB) {
+				retry();
+			} else if (key == UiKey.PASTE) {
+				paste(captionInput);
+			} else {
+				captionInput.key(key);
+			}
+			return true;
+		}
 		String name = host.keyName(rawKey);
 		if (isKey(name, modules.reels.openKey)) {
 			// Gehaltene Taste (Tastenwiederholung direkt nach dem Öffnen) steckt das Handy nicht gleich wieder weg.
@@ -411,6 +858,7 @@ public final class PhoneUi extends UiScreen {
 			rotate();
 			return true;
 		}
+		if (view == View.CAMERA) return cameraKey(name, key);
 		switch (key) {
 			case ENTER:
 				openComments();
@@ -429,6 +877,44 @@ public final class PhoneUi extends UiScreen {
 		}
 	}
 
+	/** Tasten in der Kamera: Enter/Leertaste löst aus, F/Tab wechselt Foto ↔ Selfie, Pfeile drehen den Blick, Esc zurück. */
+	private boolean cameraKey(String name, UiKey key) {
+		switch (key) {
+			case ESCAPE:
+				closeCamera();
+				return true;
+			case ENTER:
+				shutter();
+				return true;
+			case TAB:
+				toggleSelfie();
+				return true;
+			case LEFT:
+				host.turn(-LOOK_DEG_PER_KEY, 0f);
+				return true;
+			case RIGHT:
+				host.turn(LOOK_DEG_PER_KEY, 0f);
+				return true;
+			case UP:
+				host.turn(0f, -LOOK_DEG_PER_KEY);
+				return true;
+			case DOWN:
+				host.turn(0f, LOOK_DEG_PER_KEY);
+				return true;
+			default:
+				break;
+		}
+		if ("key.keyboard.space".equals(name)) {
+			shutter();
+			return true;
+		}
+		if ("key.keyboard.f".equals(name)) {
+			toggleSelfie();
+			return true;
+		}
+		return true;
+	}
+
 	private static boolean isKey(String pressed, KeySetting key) {
 		return pressed != null && key.isBound() && pressed.equals(KeyCombo.main(key.get()));
 	}
@@ -444,7 +930,12 @@ public final class PhoneUi extends UiScreen {
 
 	@Override
 	public boolean charTyped(char ch) {
-		if (view != View.COMMENTS || isClosing()) return false;
+		if (isClosing()) return false;
+		if (view == View.COMPOSE) {
+			captionInput.type(ch);
+			return true;
+		}
+		if (view != View.COMMENTS) return false;
 		commentInput.type(ch);
 		return true;
 	}
@@ -471,6 +962,16 @@ public final class PhoneUi extends UiScreen {
 		if (disposed) return;
 		disposed = true;
 		commentInput.setFocused(false);
+		captionInput.setFocused(false);
+		// Ein aufgenommenes, aber nicht gepostetes Foto bleibt nicht auf der Platte liegen.
+		Reels.Shot open = shot;
+		shot = null;
+		if (open != null) reels.discard(open);
+		shutterPending = false;
+		saving = false;
+		toast = null;
+		releaseFinder();
+		releasePreview();
 		if (photos != null) {
 			photos.releaseAll();
 			photos = null;
@@ -503,7 +1004,10 @@ public final class PhoneUi extends UiScreen {
 	/**
 	 * Wo eine Stelle des Handys im letzten Bild lag: {x, y, Breite, Höhe} in Fensterpixeln, oder null. Namen:
 	 * {@code phone}, {@code screen}, {@code photo}, {@code heart}, {@code comment}, {@code camera}, {@code rotate},
-	 * {@code home}, {@code streak}, {@code commentInput}, {@code commentsClose}, {@code commentsBack}.
+	 * {@code home}, {@code streak}, {@code commentInput}, {@code commentsClose}, {@code commentsBack}; Kamera:
+	 * {@code viewfinder}, {@code camBack}, {@code camNote}, {@code camPhoto}, {@code camSelfie}, {@code camShutter},
+	 * {@code camFlip}, {@code camThumb}; Neuer Post: {@code composePhoto}, {@code composeField}, {@code composeRetry},
+	 * {@code composePost}; dazu {@code toast}.
 	 */
 	public int[] testSpot(String name) {
 		int[] r = spots.get(name);
@@ -523,5 +1027,36 @@ public final class PhoneUi extends UiScreen {
 	/** Blits, mit denen die Arme im letzten Bild gezeichnet wurden. */
 	public int testArmBlits() {
 		return armBlits;
+	}
+
+	/** Steht die Kamera auf „Selfie“? */
+	public boolean testSelfie() {
+		return selfie;
+	}
+
+	/** Größe der Sucher-Textur {Breite, Höhe} oder null, solange noch kein Bild da ist. */
+	public int[] testViewfinder() {
+		TextureRef t = finderTexture;
+		return t == null ? null : new int[]{t.width, t.height};
+	}
+
+	/** Das aufgenommene, noch nicht gepostete Foto („Neuer Post“) oder null. */
+	public Reels.Shot testShot() {
+		return shot;
+	}
+
+	/** Wird gerade ein Foto aufgenommen oder gespeichert? */
+	public boolean testBusy() {
+		return busy();
+	}
+
+	/** Die Meldung, die gerade auf dem Handy steht, oder null. */
+	public String testToast() {
+		return toast != null && ticker() < toastUntil ? toast : null;
+	}
+
+	/** Text im Feld von „Neuer Post“. */
+	public String testCaption() {
+		return captionInput.text();
 	}
 }

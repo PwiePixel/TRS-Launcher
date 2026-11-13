@@ -2755,6 +2755,7 @@
   "reels.compose.retry": "Nochmal",
   "reels.compose.post": "Posten",
   "reels.compose.streak": "Streak: {0} → {1} Tage",
+  "reels.compose.streak.same": "Streak: {0} Tage",
   "reels.compose.local": "Bleibt vorerst auf diesem PC.",
   "reels.toast.posted": "Gepostet! Streak: {0} Tage",
   "reels.toast.failed": "Das Foto konnte nicht gespeichert werden."
