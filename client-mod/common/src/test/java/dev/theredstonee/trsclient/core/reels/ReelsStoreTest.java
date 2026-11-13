@@ -467,11 +467,11 @@ class ReelsStoreTest {
 		assertTrue(shot.selfie);
 		assertTrue(ReelsPost.validPhotoName(shot.fileName), shot.fileName);
 		assertEquals(tmp.resolve("photos").resolve(shot.fileName), shot.file);
-		assertEquals(288, shot.previewW, "Vorschau: höchstens 512 an der langen Seite");
-		assertEquals(512, shot.previewH);
-		assertEquals(288 * 512, shot.preview.length);
+		assertEquals(576, shot.previewW, "Vorschau: höchstens 1024 an der langen Seite");
+		assertEquals(1024, shot.previewH);
+		assertEquals(576 * 1024, shot.preview.length);
 		assertEquals(0xFF205080, shot.preview[0]);
-		assertEquals(0xFFE0C020, shot.preview[287]);
+		assertEquals(0xFFE0C020, shot.preview[575]);
 
 		BufferedImage png = javax.imageio.ImageIO.read(shot.file.toFile());
 		assertEquals(608, png.getWidth());
@@ -487,8 +487,8 @@ class ReelsStoreTest {
 		assertEquals(720, wide.height);
 		assertFalse(wide.portrait);
 		assertNotEquals(shot.fileName, wide.fileName, "zwei Fotos in derselben Sekunde bekommen verschiedene Namen");
-		assertEquals(512, wide.previewW);
-		assertEquals(288, wide.previewH);
+		assertEquals(1024, wide.previewW);
+		assertEquals(576, wide.previewH);
 	}
 
 	@Test

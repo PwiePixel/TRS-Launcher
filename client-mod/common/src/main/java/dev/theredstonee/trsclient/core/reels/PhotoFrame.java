@@ -8,8 +8,8 @@ package dev.theredstonee.trsclient.core.reels;
 public final class PhotoFrame {
 	/** Längste Seite eines gespeicherten Fotos (Pixel). */
 	public static final int MAX_LONG_SIDE = 1280;
-	/** Längste Seite der Vorschau vor dem Posten (Pixel). */
-	public static final int MAX_PREVIEW_SIDE = 512;
+	/** Längste Seite der Vorschau vor dem Posten (Pixel) – reicht für das Handy in einem Full-HD-Fenster ohne Hochskalieren. */
+	public static final int MAX_PREVIEW_SIDE = 1024;
 
 	private PhotoFrame() {
 	}
