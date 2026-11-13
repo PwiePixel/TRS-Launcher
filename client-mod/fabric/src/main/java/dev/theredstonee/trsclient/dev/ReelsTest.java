@@ -51,6 +51,11 @@ import java.util.TimeZone;
  * den Bildern und gehören ebenfalls angesehen: darauf dürfen weder HUD noch Chat, Handy, Arme, Schleier oder ein
  * Block-Umriss sein (der Blick zeigt beim Foto auf einen Block in Reichweite, eine Chat-Zeile steht auf dem Bildschirm).
  *
+ * <p>Danach: ein anderer Bildschirm sperrt die Handy-Taste, bis sie los war; Freelook im Umschalt-Modus endet beim
+ * Herausholen (die Kamera folgt wieder dem Spieler, die Außenansicht von davor kommt zurück); mit offener Debug-Anzeige
+ * (F3) kein Achsenkreuz im Sucher (Bild 18 ansehen); beim Selfie die Fenstergröße ändern (Bild 19: keine eigene Figur
+ * hinter dem Handy) und mit der Handy-Taste wegstecken, ohne dass ein umgedrehtes Bild stehen bleibt.
+ *
  * <p>Das Handy wird mit {@link ReelsHooks#open()} geöffnet: die Handy-Taste fragt den echten Tastenzustand ab, den
  * ein Test nicht setzen kann.
  *^/
@@ -92,6 +97,11 @@ public final class ReelsTest {
 	private Path photoFile;
 	private Path selfieFile;
 	private Path retryFile;
+	private float yawBefore;
+	private boolean crosshairOn;
+	private int crosshairsHidden;
+	private int backdropMisses;
+	private int turnedWithoutPhone;
 
 	public static void install() {
 		ReelsTest test = new ReelsTest();
@@ -836,6 +846,163 @@ public final class ReelsTest {
 				next(10);
 				return;
 			}
+			case 82:
+				// --- Ein anderer Bildschirm (wie der Chat) sperrt die Handy-Taste, bis sie einmal los war ---
+				// Sonst ginge das Handy von selbst auf, wenn die Taste beim Schließen noch unten ist (das „k“ am Ende einer
+				// Chat-Nachricht). Den echten Tastenzustand kann der Test nicht setzen – geprüft wird die Sperre.
+				Mc.setScreen(new net.minecraft.client.gui.screens.inventory.InventoryScreen(mc.player));
+				next(4);
+				return;
+			case 83:
+				check("ein anderer offener Bildschirm sperrt die Handy-Taste", Mc.screen() != null && reels.keyGate().blocked());
+				Mc.setScreen(null);
+				next(4);
+				return;
+			case 84:
+				check("nach dessen Schließen ist die Taste wieder frei (sie ist los), das Handy bleibt in der Tasche",
+						!reels.keyGate().blocked() && !ReelsHooks.phoneOpen() && Mc.screen() == null);
+				next(5);
+				return;
+			case 85:
+				// --- Freelook im Umschalt-Modus: bliebe ohne Weiteres unter dem Handy an ---
+				// Der Spieler steht in der Außenansicht (F5) und schaltet Freelook ein (Taste kurz gedrückt).
+				mc.options.setCameraType(CameraType.THIRD_PERSON_BACK);
+				modules.freelook.setEnabled(true);
+				modules.freelookToggle.set(true);
+				dev.theredstonee.trsclient.TrsKeys.freelook.setDown(true);
+				next(3);
+				return;
+			case 86:
+				dev.theredstonee.trsclient.TrsKeys.freelook.setDown(false);
+				next(5);
+				return;
+			case 87: {
+				check("Freelook im Umschalt-Modus läuft weiter, obwohl die Taste los ist", TrsClient.get().pvp().freelook().active());
+				boolean opened = ReelsHooks.open();
+				ui = ReelsHooks.phone();
+				check("das Handy beendet den Freelook beim Herausholen", opened && ui != null && !TrsClient.get().pvp().freelook().active());
+				check("Ich-Sicht; die Außenansicht des Spielers von vor dem Freelook ist gemerkt (" + ReelsHooks.viewBefore() + ")",
+						mc.options.getCameraType() == CameraType.FIRST_PERSON && ReelsHooks.viewBefore() == CameraType.THIRD_PERSON_BACK);
+				if (ui == null) {
+					phase = 91;
+					return;
+				}
+				next(15);
+				return;
+			}
+			case 88:
+				check("der Freelook bleibt aus, solange das Handy draußen ist", !TrsClient.get().pvp().freelook().active()
+						&& ReelsHooks.phoneOpen() && mc.options.getCameraType() == CameraType.FIRST_PERSON);
+				clickSpot(mc, "camera");
+				next(10);
+				return;
+			case 89:
+				// Die Kamera des Spiels folgt wieder dem Spieler: die Pfeiltaste dreht beide.
+				yawBefore = Mc.camera().yRot();
+				AutoTest.key(mc, Keys.code("key.keyboard.right"));
+				next(12);
+				return;
+			case 90: {
+				float turned = net.minecraft.util.Mth.wrapDegrees(Mc.camera().yRot() - yawBefore);
+				check(String.format(Locale.ROOT, "Pfeiltaste in der Kamera dreht das Bild des Spiels mit (%.1f°)", turned),
+						ui.testView() == PhoneUi.View.CAMERA && Math.abs(turned - 5f) < 0.3f);
+				Mc.setScreen(null);
+				check("nach dem Wegstecken ist die Außenansicht des Spielers zurück, der Freelook bleibt aus",
+						mc.options.getCameraType() == CameraType.THIRD_PERSON_BACK && !TrsClient.get().pvp().freelook().active());
+				modules.freelookToggle.set(false);
+				modules.freelook.setEnabled(false);
+				mc.options.setCameraType(CameraType.FIRST_PERSON);
+				look(mc, SCENE_YAW, 4f);
+				next(10);
+				return;
+			}
+			case 91:
+				// --- Debug-Anzeige (F3): ihr Achsenkreuz liegt im Bild der Welt, also auch im Sucher und auf dem Foto ---
+				crosshairsHidden = ReelsHooks.debugCrosshairsHidden();
+				mc.debugEntries.setOverlayVisible(true);
+				next(15);
+				return;
+			case 92: {
+				crosshairOn = mc.debugEntries.isCurrentlyEnabled(
+						net.minecraft.client.gui.components.debug.DebugScreenEntries.THREE_DIMENSIONAL_CROSSHAIR);
+				if (crosshairOn) {
+					check("Haken des Debug-Achsenkreuzes greift (DebugCrosshairRenderer.render)", ReelsHooks.debugCrosshairHookSeen());
+					check("ohne Handy bleibt das Achsenkreuz von F3, wie es ist", ReelsHooks.debugCrosshairsHidden() == crosshairsHidden);
+				} else {
+					TrsClient.LOGGER.info("[Autotest] Reels: Hinweis – das Achsenkreuz ist im Debug-Profil dieser Instanz aus, nicht geprüft");
+				}
+				crosshairsHidden = ReelsHooks.debugCrosshairsHidden();
+				boolean opened = ReelsHooks.open();
+				ui = ReelsHooks.phone();
+				check("Handy geht mit offener Debug-Anzeige auf", opened && ui != null);
+				if (ui == null) {
+					finish(mc);
+					return;
+				}
+				next(15);
+				return;
+			}
+			case 93:
+				clickSpot(mc, "camera");
+				next(30);
+				return;
+			case 94:
+				if (crosshairOn) {
+					check("mit dem Handy draußen zeichnet Minecraft das Achsenkreuz nicht (" + (ReelsHooks.debugCrosshairsHidden()
+							- crosshairsHidden) + " Bilder)", ReelsHooks.debugCrosshairsHidden() > crosshairsHidden);
+				}
+				// Zum Ansehen: in der Mitte des Suchers darf kein rot-grün-blaues Kreuz sein.
+				AutoTest.shot(mc, "trsclient-reels-18-kamera-f3");
+				next(15);
+				return;
+			case 95:
+				mc.debugEntries.setOverlayVisible(false);
+				// --- Selfie und Fenstergröße: kein umgedrehtes Bild ohne die normale Sicht dahinter ---
+				clickSpot(mc, "camSelfie");
+				next(40);
+				return;
+			case 96:
+				check("Selfie läuft (Kamera losgelöst, normale Sicht gesichert)", ui.selfieActive() && Mc.camera().isDetached()
+						&& ReelsHooks.backdropValid() && !ReelsHooks.backdropBroken());
+				backdropMisses = ReelsHooks.backdropMisses();
+				windowSize(1280, 720);
+				next(40);
+				return;
+			case 97:
+				check("Fenster 1280×720 beim Selfie: die normale Sicht ist neu gesichert, kein Bild blieb umgedreht stehen ("
+						+ (ReelsHooks.backdropMisses() - backdropMisses) + ")", Mc.window().getWidth() == 1280
+						&& Mc.camera().isDetached() && ReelsHooks.backdropValid() && !ReelsHooks.backdropBroken()
+						&& ReelsHooks.backdropMisses() == backdropMisses);
+				AutoTest.shot(mc, "trsclient-reels-19-selfie-1280");
+				next(15);
+				return;
+			case 98:
+				windowSize(1920, 1080);
+				next(40);
+				return;
+			case 99: {
+				check("zurück auf 1920×1080 beim Selfie: ebenso", Mc.window().getWidth() == 1920 && Mc.camera().isDetached()
+						&& ReelsHooks.backdropValid() && !ReelsHooks.backdropBroken() && ReelsHooks.backdropMisses() == backdropMisses);
+				// --- Wegstecken mit der Handy-Taste, während „Selfie“ gewählt ist ---
+				turnedWithoutPhone = ReelsHooks.turnedWithoutPhone();
+				AutoTest.key(mc, Keys.code(dev.theredstonee.trsclient.core.input.KeyCombo.main(modules.reels.openKey.get())));
+				check("die Handy-Taste steckt auch vom Selfie aus weg; die Kamera des Spiels dreht sich dabei nicht mehr um",
+						ui.isClosing() && ui.testSelfie() && !ui.selfieActive());
+				if (!ui.isClosing()) ui.requestClose();
+				next(30);
+				return;
+			}
+			case 100:
+				check("Handy ist zu, die Kamera des Spiels schaut normal", !ReelsHooks.phoneOpen() && Mc.screen() == null
+						&& ui.disposed() && !Mc.camera().isDetached());
+				check("kein Bild war noch umgedreht, als das Handy verschwand (" + (ReelsHooks.turnedWithoutPhone()
+						- turnedWithoutPhone) + ")", ReelsHooks.turnedWithoutPhone() == turnedWithoutPhone && !ReelsHooks.backdropValid());
+				next(10);
+				return;
+			case 101:
+				AutoTest.shot(mc, "trsclient-reels-20-nach-selfie-weg");
+				next(15);
+				return;
 			default:
 				finish(mc);
 		}
@@ -848,6 +1015,8 @@ public final class ReelsTest {
 		try {
 			ReelsHooks.testBlur(false);
 			TrsClient.get().pvp().forceFreelook(Float.NaN);
+			dev.theredstonee.trsclient.TrsKeys.freelook.setDown(false);
+			mc.debugEntries.setOverlayVisible(false);
 			if (before != null) TrsClient.get().modules().registry.apply(before);
 			guiScale(mc, guiScaleBefore);
 			mc.options.setCameraType(CameraType.FIRST_PERSON);
