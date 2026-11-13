@@ -8,6 +8,7 @@ import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.util.List;
 import java.util.TimeZone;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Executor;
@@ -84,6 +85,10 @@ public final class Reels {
 	/** Nummer des Fotos, auf das gerade jemand wartet (0 = niemand). */
 	private volatile long wanted;
 	private long lastTicket;
+	/** Gedächtnis dieser Sitzung (nicht gespeichert): so viele ungesehene Erwähnungen waren zuletzt gemeldet. */
+	private int announcedPings;
+	/** Gedächtnis dieser Sitzung: der Tag, für den „gestern lässt sich retten“ schon gemeldet wurde. */
+	private long rescueHintDay = Long.MIN_VALUE;
 
 	Reels(TrsModules modules, ReelsBackend backend, Consumer<String> log, Executor worker, TimeZone zone) {
 		this.modules = modules;
@@ -305,8 +310,14 @@ public final class Reels {
 
 	/** Foto posten: steht danach vorn im Feed. Rückgabe: der Post oder null (Foto fehlgeschlagen). */
 	public ReelsPost post(Shot shot, String caption, String author, long now) {
+		return post(shot, caption, author, now, null);
+	}
+
+	/** Foto posten und dazu festhalten, womit es aufgenommen wurde ({@code meta}, darf null sein). */
+	public ReelsPost post(Shot shot, String caption, String author, long now, ReelsMeta meta) {
 		if (shot == null || shot.failed || shot.fileName == null) return null;
-		ReelsPost p = backend.post(shot.fileName, shot.width, shot.height, shot.portrait, shot.selfie, caption, author, now);
+		ReelsPost p = backend.post(shot.fileName, shot.width, shot.height, shot.portrait, shot.selfie, caption, author, now,
+				meta);
 		if (p != null) saveLater();
 		return p;
 	}
@@ -323,6 +334,77 @@ public final class Reels {
 		ReelsComment c = backend.comment(postId, author, text, now);
 		if (c != null) saveLater();
 		return c;
+	}
+
+	/** Auf einen Kommentar antworten; null, wenn der Text leer ist oder es den Post nicht gibt. */
+	public ReelsComment reply(String postId, String parentId, String author, String text, long now) {
+		ReelsComment c = backend.reply(postId, parentId, author, text, now);
+		if (c != null) saveLater();
+		return c;
+	}
+
+	/**
+	 * Den Text eines eigenen Kommentars ändern. Rückgabe: der Kommentar (bei unverändertem Text ohne Änderung) oder
+	 * null (fremd, unbekannt oder leerer Text).
+	 */
+	public ReelsComment editComment(String postId, String commentId, String author, String text, long now) {
+		List<ReelsPost> before = backend.feed();
+		ReelsComment c = backend.editComment(postId, commentId, author, text, now);
+		if (c != null && backend.feed() != before) saveLater();
+		return c;
+	}
+
+	/** Erwähnungen und Antworten unter diesem Post als gesehen merken. Rückgabe: wie viele es waren. */
+	public int markPingsSeen(String postId, String self) {
+		int n = backend.markPingsSeen(postId, self);
+		if (n > 0) saveLater();
+		return n;
+	}
+
+	// --- Streak-Schutz ---
+
+	/** Einen Tag der Streak schützen: heute („pausieren“) oder gestern („retten“). */
+	public StreakGuard.Result protect(boolean yesterday, long now) {
+		StreakGuard.Result r = backend.protect(yesterday, now);
+		if (r == StreakGuard.Result.OK) saveLater();
+		return r;
+	}
+
+	/**
+	 * Das Handy wurde herausgeholt: der Feed merkt sich den Kalendertag ({@link ReelsBackend#noteClock}). War es der
+	 * erste Blick an diesem Tag, wird gleich gesichert – sonst ließe sich der gemerkte Tag durch ein hartes Beenden des
+	 * Spiels wieder loswerden.
+	 */
+	public void noteClock(long now) {
+		LocalReelsBackend local = backend instanceof LocalReelsBackend ? (LocalReelsBackend) backend : null;
+		boolean clean = local != null && !local.dirty();
+		backend.noteClock(now);
+		if (clean && local.dirty()) saveLater();
+	}
+
+	/** Der Kalendertag (Tage seit 1970) eines Zeitpunkts in der Zeitzone dieses Dienstes. */
+	public long epochDay(long now) {
+		return ReelsTime.epochDay(now, zone.getOffset(now));
+	}
+
+	// --- Gedächtnis dieser Sitzung (Meldungen nicht bei jedem Herausholen wiederholen) ---
+
+	/**
+	 * Soll die Zahl der ungesehenen Erwähnungen und Antworten jetzt gemeldet werden? Ja, wenn sie seit der letzten
+	 * Abfrage gestiegen ist – also einmal nach dem Spielstart und wieder, wenn eine neue dazukommt, aber nicht bei
+	 * jedem Herausholen des Handys. Die Zahl wird dabei gemerkt.
+	 */
+	public synchronized boolean announcePings(int unseen) {
+		boolean rose = unseen > announcedPings;
+		announcedPings = unseen;
+		return rose;
+	}
+
+	/** Soll „gestern lässt sich retten“ jetzt gemeldet werden? Ja beim ersten Aufruf für diesen Tag. */
+	public synchronized boolean hintRescue(long epochDay) {
+		if (epochDay == rescueHintDay) return false;
+		rescueHintDay = epochDay;
+		return true;
 	}
 
 	// --- Sichern ---

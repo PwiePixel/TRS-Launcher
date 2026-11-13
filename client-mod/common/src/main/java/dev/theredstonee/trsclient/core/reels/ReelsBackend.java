@@ -28,17 +28,68 @@ public interface ReelsBackend {
 	ReelsPost post(String photoFileName, int width, int height, boolean portrait, boolean selfie, String caption, String author,
 			long now);
 
+	/**
+	 * Neuen Post anlegen und dazu festhalten, womit das Foto aufgenommen wurde ({@code meta}, darf null sein). Ein
+	 * Backend, das diese Angaben nicht speichert, legt den Post ohne sie an.
+	 */
+	default ReelsPost post(String photoFileName, int width, int height, boolean portrait, boolean selfie, String caption,
+			String author, long now, ReelsMeta meta) {
+		return post(photoFileName, width, height, portrait, selfie, caption, author, now);
+	}
+
 	/** Like umschalten. Rückgabe: der neue Zustand (false auch, wenn es den Post nicht gibt). */
 	boolean toggleLike(String postId);
 
 	/** Kommentar anhängen; null, wenn es den Post nicht gibt oder der Text leer ist. */
 	ReelsComment comment(String postId, String author, String text, long now);
 
+	/**
+	 * Auf einen Kommentar antworten (eine Ebene: die Antwort auf eine Antwort hängt am selben Kommentar der obersten
+	 * Ebene). Gibt es {@code parentId} nicht, wird es ein Kommentar der obersten Ebene. Null wie bei {@link #comment}.
+	 */
+	default ReelsComment reply(String postId, String parentId, String author, String text, long now) {
+		return comment(postId, author, text, now);
+	}
+
+	/**
+	 * Den Text eines eigenen Kommentars ändern ({@code author} muss der Verfasser sein, ohne Groß-/Kleinschreibung).
+	 * Rückgabe: der Kommentar – bei unverändertem Text ohne Änderung –, oder null (unbekannt, fremd, leerer Text, oder
+	 * dieses Backend kann nicht bearbeiten).
+	 */
+	default ReelsComment editComment(String postId, String commentId, String author, String text, long now) {
+		return null;
+	}
+
+	/**
+	 * Erwähnungen und Antworten unter diesem Post, die {@code self} betreffen ({@link Pings}), als gesehen merken.
+	 * Rückgabe: wie viele es waren.
+	 */
+	default int markPingsSeen(String postId, String self) {
+		return 0;
+	}
+
 	/** Tage in Folge mit mindestens einem Post (siehe {@link ReelsTime#streak}). */
 	int streak(long now);
 
 	/** Die Streak, die gälte, wenn jetzt ein Post dazukäme (ändert nichts). */
 	int streakAfterPost(long now);
+
+	/** Stand des Streak-Schutzes ({@link StreakGuard#NONE}, wenn dieses Backend keinen kennt). */
+	default StreakGuard streakGuard(long now) {
+		return StreakGuard.NONE;
+	}
+
+	/** Einen Tag schützen: heute („pausieren“) oder gestern („retten“). Ändert nur bei {@link StreakGuard.Result#OK} etwas. */
+	default StreakGuard.Result protect(boolean yesterday, long now) {
+		return StreakGuard.Result.UNAVAILABLE;
+	}
+
+	/**
+	 * Das Handy wurde herausgeholt: den Kalendertag merken, damit ein späteres Zurückstellen der Uhr keinen
+	 * Streak-Schutz erlaubt.
+	 */
+	default void noteClock(long now) {
+	}
 
 	/** Datei des Fotos eines Posts (null, wenn der Post keinen gültigen Dateinamen hat). */
 	Path photoFile(ReelsPost post);

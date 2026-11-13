@@ -851,4 +851,566 @@ class ReelsStoreTest {
 		LocalReelsBackend a = new LocalReelsBackend(null, UTC);
 		assertNotEquals(a.newId(NOON), a.newId(NOON));
 	}
+
+	// --- Kommentare: IDs, Antworten, Bearbeiten, gesehen ---
+
+	/** Eine feed.json, wie sie die erste Fassung von MC-Reels geschrieben hat: Kommentare ohne ID, nichts Neueres. */
+	private static String oldFeed() {
+		return "{\"version\":1,\"posts\":[{\"id\":\"20261113-120000-0001\",\"author\":\"PixelCST\",\"caption\":\"alt\","
+				+ "\"photo\":\"20261113-120000-0001.png\",\"width\":1280,\"height\":720,\"selfie\":false,\"portrait\":false,"
+				+ "\"likedByMe\":false,\"likes\":0,\"createdAt\":" + NOON + ",\"comments\":["
+				+ "{\"author\":\"Steve_Baut\",\"text\":\"Stark!\",\"at\":" + (NOON + 1000) + "},"
+				+ "{\"author\":\"PixelCST\",\"text\":\"Danke\",\"at\":" + (NOON + 1000) + "},"
+				+ "{\"author\":\"Bea\",\"text\":\"wo ist das?\",\"at\":" + (NOON + 2000) + "}]}]}";
+	}
+
+	private String feedJson() throws IOException {
+		return new String(Files.readAllBytes(tmp.resolve("feed.json")), StandardCharsets.UTF_8);
+	}
+
+	private static List<String> commentIds(LocalReelsBackend b) {
+		List<String> ids = new ArrayList<String>();
+		for (ReelsComment c : b.feed().get(0).comments) ids.add(c.id);
+		return ids;
+	}
+
+	private static int count(String text, String part) {
+		int n = 0;
+		for (int i = text.indexOf(part); i >= 0; i = text.indexOf(part, i + part.length())) n++;
+		return n;
+	}
+
+	@Test
+	void oldFeedLoadsCleanAndGetsOnlyCommentIdsOnTheNextWrite() throws IOException {
+		Files.write(tmp.resolve("feed.json"), oldFeed().getBytes(StandardCharsets.UTF_8));
+		LocalReelsBackend a = new LocalReelsBackend(tmp, UTC);
+		assertFalse(a.dirty(), "Laden allein ändert nichts");
+		a.flush();
+		assertEquals(oldFeed(), feedJson(), "ohne Änderung bleibt die alte Datei Byte für Byte liegen");
+		ReelsPost p = a.feed().get(0);
+		assertNull(p.meta);
+		assertEquals(3, p.comments.size());
+		List<String> first = commentIds(a);
+		for (ReelsComment c : p.comments) {
+			assertTrue(ReelsPost.validId(c.id), "jeder alte Kommentar hat nach dem Laden eine ID: " + c.id);
+			assertNull(c.replyTo);
+			assertNull(c.editedAt);
+			assertNull(c.seen);
+		}
+		assertEquals(3, new java.util.HashSet<String>(first).size(), "eindeutig innerhalb des Posts");
+
+		a.toggleLike(p.id);
+		a.flush();
+		String json = feedJson();
+		for (String key : Arrays.asList("meta", "freezes", "clockDay", "replyTo", "editedAt", "seen")) {
+			assertFalse(json.contains("\"" + key + "\""), "kein neues Feld ohne Anlass: " + key);
+		}
+		assertEquals(4, count(json, "\"id\""), "der Post und jeder der drei Kommentare hat eine ID");
+		for (String id : first) assertTrue(json.contains("\"" + id + "\""), id);
+
+		LocalReelsBackend b = new LocalReelsBackend(tmp, UTC);
+		assertEquals(first, commentIds(b), "die geschriebenen IDs sind die vom ersten Laden");
+		assertEquals("Stark!", b.feed().get(0).comments.get(0).text);
+		assertTrue(b.feed().get(0).likedByMe);
+	}
+
+	@Test
+	void sameOldFileGivesTheSameIdsOnEveryLoad() throws IOException {
+		Files.write(tmp.resolve("feed.json"), oldFeed().getBytes(StandardCharsets.UTF_8));
+		List<String> first = commentIds(new LocalReelsBackend(tmp, UTC));
+		// Aus Zeit (UTC) und Stelle – nicht aus Zufall und nicht aus der Zeitzone des Spielers.
+		assertEquals(Arrays.asList("20261113-120001-0000", "20261113-120001-0001", "20261113-120002-0002"), first);
+		assertEquals(first, commentIds(new LocalReelsBackend(tmp, UTC)));
+		assertEquals(first, commentIds(new LocalReelsBackend(tmp, TimeZone.getTimeZone("Asia/Tokyo"))));
+		assertEquals(oldFeed(), feedJson(), "nur gelesen");
+
+		// Unbrauchbare Zeiten, eine doppelte und eine ungültige ID: trotzdem lauter gültige, verschiedene IDs.
+		Path other = tmp.resolve("schräg");
+		Files.createDirectories(other);
+		String json = "{\"version\":1,\"posts\":[{\"id\":\"20261113-120000-0001\",\"photo\":\"20261113-120000-0001.png\","
+				+ "\"createdAt\":" + NOON + ",\"comments\":["
+				+ "{\"id\":\"19700101-000000-0001\",\"author\":\"A\",\"text\":\"a\",\"at\":0},"
+				+ "{\"id\":\"19700101-000000-0001\",\"author\":\"B\",\"text\":\"b\",\"at\":0},"
+				+ "{\"id\":\"../x\",\"author\":\"C\",\"text\":\"c\",\"at\":" + Long.MAX_VALUE + "},"
+				+ "{\"author\":\"D\",\"text\":\"d\",\"at\":" + Long.MIN_VALUE + "},"
+				+ "{\"author\":\"E\",\"text\":\"e\",\"at\":0}]}]}";
+		Files.write(other.resolve("feed.json"), json.getBytes(StandardCharsets.UTF_8));
+		List<String> odd = commentIds(new LocalReelsBackend(other, UTC));
+		assertEquals(5, odd.size());
+		assertEquals(5, new java.util.HashSet<String>(odd).size(), odd.toString());
+		for (String id : odd) assertTrue(ReelsPost.validId(id), id);
+		assertEquals("19700101-000000-0001", odd.get(0), "die erste gültige ID bleibt");
+		assertEquals(odd, commentIds(new LocalReelsBackend(other, UTC)));
+	}
+
+	@Test
+	void idsRepliesEditsAndSeenSurviveReload() throws IOException {
+		LocalReelsBackend a = new LocalReelsBackend(tmp, UTC);
+		ReelsPost p = a.post(photo(1), 1280, 720, false, false, "", "PixelCST", NOON);
+		ReelsComment own = a.comment(p.id, "PixelCST", "erster", NOON + 1000);
+		ReelsComment other = a.comment(p.id, "Steve_Baut", "Stark! @PixelCST wo ist das?", NOON + 2000);
+		ReelsComment reply = a.reply(p.id, own.id, "Steve_Baut", "Antwort", NOON + 3000);
+		assertTrue(ReelsPost.validId(own.id), own.id);
+		assertNotEquals(own.id, other.id);
+		assertNotEquals(other.id, reply.id);
+		assertEquals(own.id, reply.replyTo);
+		assertNull(own.replyTo);
+		assertNotNull(a.editComment(p.id, own.id, "PixelCST", "erster, verbessert", NOON + 4000));
+		assertEquals(2, a.markPingsSeen(p.id, "PixelCST"), "die Erwähnung und die Antwort auf den eigenen Kommentar");
+		a.flush();
+		String json = feedJson();
+		assertTrue(json.contains("\"replyTo\"") && json.contains("\"editedAt\"") && json.contains("\"seen\""), json);
+
+		List<ReelsComment> read = new LocalReelsBackend(tmp, UTC).feed().get(0).comments;
+		assertEquals(3, read.size());
+		assertEquals(own.id, read.get(0).id);
+		assertEquals("erster, verbessert", read.get(0).text);
+		assertEquals(Long.valueOf(NOON + 4000), read.get(0).editedAt);
+		assertNull(read.get(0).seen, "ein eigener Kommentar ist nie ein Ping");
+		assertEquals(other.id, read.get(1).id);
+		assertEquals(Boolean.TRUE, read.get(1).seen);
+		assertNull(read.get(1).editedAt);
+		assertEquals(reply.id, read.get(2).id);
+		assertEquals(own.id, read.get(2).replyTo);
+		assertEquals(Boolean.TRUE, read.get(2).seen);
+	}
+
+	@Test
+	void editOnlyByTheAuthorAndMarksEdited() {
+		LocalReelsBackend a = new LocalReelsBackend(null, UTC);
+		ReelsPost p = a.post(photo(1), 1280, 720, false, false, "", "PixelCST", NOON);
+		ReelsComment c = a.comment(p.id, "PixelCST", "Tipfehler", NOON + 1000);
+		assertNull(c.editedAt);
+		List<ReelsPost> before = a.feed();
+		assertNull(a.editComment(p.id, c.id, "Steve_Baut", "gekapert", NOON + 2000), "nur der Verfasser");
+		assertNull(a.editComment(p.id, c.id, "", "gekapert", NOON + 2000));
+		assertNull(a.editComment(p.id, c.id, null, "gekapert", NOON + 2000));
+		assertNull(a.editComment(p.id, "20000101-000000-0000", "PixelCST", "x", NOON + 2000), "unbekannter Kommentar");
+		assertNull(a.editComment("20000101-000000-0000", c.id, "PixelCST", "x", NOON + 2000), "unbekannter Post");
+		assertNull(a.editComment(p.id, null, "PixelCST", "x", NOON + 2000));
+		assertSame(before, a.feed(), "nichts davon ändert den Feed");
+		assertEquals("Tipfehler", c.text);
+
+		ReelsComment edited = a.editComment(p.id, c.id, "pixelcst", "  Tippfehler\n ", NOON + 2000);
+		assertSame(c, edited, "derselbe Kommentar, der Name zählt ohne Groß-/Kleinschreibung");
+		assertEquals("Tippfehler", c.text, "gesäubert wie ein neuer Kommentar");
+		assertEquals(Long.valueOf(NOON + 2000), c.editedAt);
+		assertEquals(NOON + 1000, c.at, "der Zeitpunkt des Kommentars bleibt");
+		assertNotSame(before, a.feed());
+		assertTrue(a.dirty());
+		assertEquals(1, p.comments.size());
+
+		StringBuilder longText = new StringBuilder();
+		for (int i = 0; i < 200; i++) longText.append('x');
+		assertEquals(ReelsComment.MAX_TEXT, a.editComment(p.id, c.id, "PixelCST", longText.toString(), NOON + 3000).text.length());
+	}
+
+	@Test
+	void unchangedEditIsNotMarked() throws IOException {
+		LocalReelsBackend a = new LocalReelsBackend(tmp, UTC);
+		ReelsPost p = a.post(photo(1), 1280, 720, false, false, "", "PixelCST", NOON);
+		ReelsComment c = a.comment(p.id, "PixelCST", "bleibt so", NOON + 1000);
+		a.flush();
+		List<ReelsPost> before = a.feed();
+		assertSame(c, a.editComment(p.id, c.id, "PixelCST", "  bleibt so ", NOON + 2000), "der Kommentar kommt zurück");
+		assertNull(c.editedAt, "unveränderter Text gilt nicht als bearbeitet");
+		assertSame(before, a.feed());
+		assertFalse(a.dirty());
+	}
+
+	@Test
+	void emptyEditIsRejected() {
+		LocalReelsBackend a = new LocalReelsBackend(null, UTC);
+		ReelsPost p = a.post(photo(1), 1280, 720, false, false, "", "PixelCST", NOON);
+		ReelsComment c = a.comment(p.id, "PixelCST", "bleibt", NOON + 1000);
+		assertNull(a.editComment(p.id, c.id, "PixelCST", "  \n ", NOON + 2000));
+		assertNull(a.editComment(p.id, c.id, "PixelCST", null, NOON + 2000));
+		assertEquals("bleibt", c.text);
+		assertNull(c.editedAt);
+	}
+
+	@Test
+	void replyToAReplyAttachesToItsParent() {
+		LocalReelsBackend a = new LocalReelsBackend(null, UTC);
+		ReelsPost p = a.post(photo(1), 1280, 720, false, false, "", "PixelCST", NOON);
+		ReelsComment top = a.comment(p.id, "PixelCST", "oben", NOON + 1000);
+		ReelsComment reply = a.reply(p.id, top.id, "Steve_Baut", "Antwort", NOON + 2000);
+		ReelsComment second = a.reply(p.id, reply.id, "Bea", "Antwort auf die Antwort", NOON + 3000);
+		assertEquals(top.id, reply.replyTo);
+		assertEquals(top.id, second.replyTo, "nur eine Ebene");
+		assertEquals(3, p.comments.size());
+		assertNull(a.reply(p.id, top.id, "Bea", "   ", NOON), "leere Antwort wird nicht gespeichert");
+		assertNull(a.reply("20000101-000000-0000", top.id, "Bea", "hallo", NOON));
+	}
+
+	@Test
+	void replyToAnUnknownParentBecomesTopLevel() {
+		LocalReelsBackend a = new LocalReelsBackend(null, UTC);
+		ReelsPost p = a.post(photo(1), 1280, 720, false, false, "", "PixelCST", NOON);
+		ReelsComment c = a.reply(p.id, "20000101-000000-0000", "Bea", "wohin?", NOON + 1000);
+		assertNotNull(c);
+		assertNull(c.replyTo);
+		assertNull(a.reply(p.id, null, "Bea", "auch oben", NOON + 2000).replyTo);
+		assertNull(a.reply(p.id, "../x", "Bea", "auch oben", NOON + 3000).replyTo);
+		assertEquals(3, p.comments.size());
+	}
+
+	@Test
+	void handEditedReplyChainsAreFlattenedOnLoad() throws IOException {
+		String a = "20261113-120001-000a";
+		String b = "20261113-120002-000b";
+		String c = "20261113-120003-000c";
+		String d = "20261113-120004-000d";
+		String e = "20261113-120005-000e";
+		String f = "20261113-120006-000f";
+		String g = "20261113-120007-0010";
+		String json = "{\"version\":1,\"posts\":[{\"id\":\"20261113-120000-0001\",\"photo\":\"20261113-120000-0001.png\","
+				+ "\"createdAt\":" + NOON + ",\"comments\":["
+				+ "{\"id\":\"" + a + "\",\"author\":\"A\",\"text\":\"oben\",\"at\":1},"
+				+ "{\"id\":\"" + b + "\",\"author\":\"B\",\"text\":\"Antwort\",\"at\":2,\"replyTo\":\"" + a + "\"},"
+				+ "{\"id\":\"" + c + "\",\"author\":\"C\",\"text\":\"Antwort auf Antwort\",\"at\":3,\"replyTo\":\"" + b + "\"},"
+				+ "{\"id\":\"" + d + "\",\"author\":\"D\",\"text\":\"auf sich selbst\",\"at\":4,\"replyTo\":\"" + d + "\"},"
+				+ "{\"id\":\"" + e + "\",\"author\":\"E\",\"text\":\"ins Leere\",\"at\":5,\"replyTo\":\"20000101-000000-0000\","
+				+ "\"editedAt\":0,\"seen\":false},"
+				+ "{\"id\":\"" + f + "\",\"author\":\"F\",\"text\":\"im Kreis 1\",\"at\":6,\"replyTo\":\"" + g + "\"},"
+				+ "{\"id\":\"" + g + "\",\"author\":\"G\",\"text\":\"im Kreis 2\",\"at\":7,\"replyTo\":\"" + f + "\",\"editedAt\":-5,"
+				+ "\"seen\":true}]}]}";
+		Files.write(tmp.resolve("feed.json"), json.getBytes(StandardCharsets.UTF_8));
+		LocalReelsBackend loaded = new LocalReelsBackend(tmp, UTC);
+		assertFalse(loaded.dirty());
+		List<ReelsComment> read = loaded.feed().get(0).comments;
+		assertEquals(7, read.size());
+		assertNull(read.get(0).replyTo);
+		assertEquals(a, read.get(1).replyTo);
+		assertEquals(a, read.get(2).replyTo, "die Antwort auf eine Antwort hängt am Kommentar der obersten Ebene");
+		assertNull(read.get(3).replyTo, "auf sich selbst");
+		assertNull(read.get(4).replyTo, "unbekannter Kommentar");
+		assertNull(read.get(4).editedAt, "0 heißt: nie bearbeitet");
+		assertNull(read.get(4).seen, "nur true wird gemerkt");
+		assertNull(read.get(5).replyTo, "im Kreis");
+		assertNull(read.get(6).replyTo, "im Kreis");
+		assertNull(read.get(6).editedAt);
+		assertEquals(Boolean.TRUE, read.get(6).seen);
+		for (CommentThread.Row row : CommentThread.rows(read)) {
+			assertEquals(row.comment == read.get(1) || row.comment == read.get(2), row.reply, row.comment.text);
+		}
+	}
+
+	@Test
+	void markPingsSeenIsStoredAndChangesNothingTheSecondTime() throws IOException {
+		LocalReelsBackend a = new LocalReelsBackend(tmp, UTC);
+		ReelsPost p = a.post(photo(1), 1280, 720, false, false, "", "PixelCST", NOON);
+		ReelsPost q = a.post(photo(2), 1280, 720, false, false, "", "PixelCST", NOON + 10);
+		ReelsComment ping = a.comment(p.id, "Steve_Baut", "Stark! @pixelcst wo ist das?", NOON + 1000);
+		ReelsComment plain = a.comment(p.id, "Steve_Baut", "ohne Namen", NOON + 2000);
+		ReelsComment elsewhere = a.comment(q.id, "Bea", "@PixelCST schau", NOON + 3000);
+		assertEquals(2, Pings.unseen(a.feed(), "PixelCST"));
+		a.flush();
+		List<ReelsPost> before = a.feed();
+		assertEquals(0, a.markPingsSeen("20000101-000000-0000", "PixelCST"));
+		assertEquals(0, a.markPingsSeen(p.id, "Niemand"));
+		assertEquals(0, a.markPingsSeen(p.id, null));
+		assertSame(before, a.feed());
+		assertFalse(a.dirty());
+
+		assertEquals(1, a.markPingsSeen(p.id, "PixelCST"));
+		assertEquals(Boolean.TRUE, ping.seen);
+		assertNull(plain.seen, "nur was den Spieler betrifft, wird gemerkt");
+		assertNull(elsewhere.seen, "nur der Post, dessen Kommentare offen sind");
+		assertNotSame(before, a.feed());
+		assertTrue(a.dirty());
+		a.flush();
+		assertEquals(1, count(feedJson(), "\"seen\": true"));
+
+		before = a.feed();
+		assertEquals(0, a.markPingsSeen(p.id, "PixelCST"), "beim zweiten Mal ist nichts mehr zu merken");
+		assertSame(before, a.feed());
+		assertFalse(a.dirty());
+		LocalReelsBackend b = new LocalReelsBackend(tmp, UTC);
+		assertEquals(1, Pings.unseen(b.feed(), "PixelCST"), "der andere Post ist noch ungesehen");
+	}
+
+	@Test
+	void commentCapStillHoldsForReplies() {
+		LocalReelsBackend a = new LocalReelsBackend(null, UTC);
+		ReelsPost p = a.post(photo(1), 1280, 720, false, false, "", "PixelCST", NOON);
+		ReelsComment top = a.comment(p.id, "PixelCST", "oben", NOON);
+		for (int i = 1; i < LocalReelsBackend.MAX_COMMENTS; i++) assertNotNull(a.reply(p.id, top.id, "Bea", "Antwort " + i, NOON));
+		assertEquals(LocalReelsBackend.MAX_COMMENTS, p.comments.size());
+		assertNull(a.reply(p.id, top.id, "Bea", "eine zu viel", NOON));
+		assertNull(a.comment(p.id, "Bea", "eine zu viel", NOON));
+		java.util.Set<String> ids = new java.util.HashSet<String>();
+		for (ReelsComment c : p.comments) assertTrue(ids.add(c.id), "auch in derselben Sekunde ist jede ID eigen: " + c.id);
+		// Bearbeiten geht auch am vollen Post.
+		assertNotNull(a.editComment(p.id, top.id, "PixelCST", "oben, geändert", NOON + 1));
+	}
+
+	// --- Angaben zum Foto (Shader, Instanz, Version, Loader) ---
+
+	@Test
+	void metaSurvivesFlushAndReload() throws IOException {
+		LocalReelsBackend a = new LocalReelsBackend(tmp, UTC);
+		ReelsMeta meta = new ReelsMeta("26.2", "fabric", "BSL_v8.2.09", "All the Mods 10");
+		ReelsPost p = a.post(photo(1), 1280, 720, false, false, "mit", "PixelCST", NOON, meta);
+		assertNotNull(p.meta);
+		assertNotSame(meta, p.meta, "der Post hält seine eigene Kopie");
+		a.flush();
+		assertTrue(feedJson().contains("\"meta\""));
+		ReelsMeta read = new LocalReelsBackend(tmp, UTC).feed().get(0).meta;
+		assertEquals("26.2", read.mc);
+		assertEquals("fabric", read.loader);
+		assertEquals("BSL_v8.2.09", read.shader);
+		assertEquals("All the Mods 10", read.pack);
+		assertEquals("26.2 · Fabric", read.versionLabel());
+	}
+
+	@Test
+	void oldPostsLoadWithoutMetaAndNoMetaKeyIsWritten() throws IOException {
+		Files.write(tmp.resolve("feed.json"), oldFeed().getBytes(StandardCharsets.UTF_8));
+		LocalReelsBackend a = new LocalReelsBackend(tmp, UTC);
+		assertNull(a.feed().get(0).meta);
+		a.post(photo(2), 1280, 720, false, false, "ohne", "PixelCST", NOON + 5, null);
+		a.post(photo(3), 1280, 720, false, false, "leer", "PixelCST", NOON + 6, new ReelsMeta(null, " ", "", "\n"));
+		a.flush();
+		assertFalse(feedJson().contains("\"meta\""), "ohne Angaben steht kein meta in der Datei");
+		for (ReelsPost p : new LocalReelsBackend(tmp, UTC).feed()) assertNull(p.meta);
+	}
+
+	@Test
+	void metaIsCleanedCappedAndDroppedWhenEmpty() {
+		LocalReelsBackend a = new LocalReelsBackend(null, UTC);
+		StringBuilder longName = new StringBuilder();
+		for (int i = 0; i < 100; i++) longName.append((char) ('a' + i % 26));
+		ReelsPost p = a.post(photo(1), 1280, 720, false, false, "", "A", NOON,
+				new ReelsMeta(" 26.2 ", "Fabric", "  Complementary\n§cReimagined  " + longName, longName.toString()));
+		assertEquals("26.2", p.meta.mc);
+		assertEquals("fabric", p.meta.loader, "klein geschrieben");
+		assertEquals(ReelsMeta.MAX_SHADER, p.meta.shader.length());
+		assertTrue(p.meta.shader.startsWith("Complementary  cReimagined"), p.meta.shader);
+		assertEquals(ReelsMeta.MAX_PACK, p.meta.pack.length());
+
+		ReelsPost only = a.post(photo(2), 1280, 720, false, false, "", "A", NOON + 1, new ReelsMeta(null, null, "BSL", null));
+		assertNull(only.meta.mc);
+		assertNull(only.meta.loader);
+		assertEquals("BSL", only.meta.shader);
+		assertNull(only.meta.pack);
+
+		assertNull(a.post(photo(3), 1280, 720, false, false, "", "A", NOON + 2, new ReelsMeta("", "", " ", "\t")).meta);
+		assertNull(a.post(photo(4), 1280, 720, false, false, "", "A", NOON + 3, null).meta);
+	}
+
+	@Test
+	void badVersionAndUnknownLoaderFormAreDropped() throws IOException {
+		String json = "{\"version\":1,\"posts\":["
+				+ "{\"id\":\"20261113-120000-0001\",\"photo\":\"20261113-120000-0001.png\",\"createdAt\":1,"
+				+ "\"meta\":{\"mc\":\"26.2<script>\",\"loader\":\"fabric!\",\"shader\":\"BSL\"}},"
+				+ "{\"id\":\"20261113-120000-0002\",\"photo\":\"20261113-120000-0002.png\",\"createdAt\":2,"
+				+ "\"meta\":{\"mc\":\"1.21.4-pre1 +b_2\",\"loader\":\"NeoForge\",\"pack\":\"P\"}},"
+				+ "{\"id\":\"20261113-120000-0003\",\"photo\":\"20261113-120000-0003.png\",\"createdAt\":3,"
+				+ "\"meta\":{\"mc\":\"12345678901234567\",\"loader\":\"abcdefghijklmnopq\"}},"
+				+ "{\"id\":\"20261113-120000-0004\",\"photo\":\"20261113-120000-0004.png\",\"createdAt\":4,"
+				+ "\"meta\":{\"mc\":\"ä\",\"loader\":\"fabric 2\"}},"
+				+ "{\"id\":\"20261113-120000-0005\",\"photo\":\"20261113-120000-0005.png\",\"createdAt\":5,\"meta\":{}}]}";
+		Files.write(tmp.resolve("feed.json"), json.getBytes(StandardCharsets.UTF_8));
+		LocalReelsBackend a = new LocalReelsBackend(tmp, UTC);
+		List<ReelsPost> feed = a.feed();
+		assertEquals(5, feed.size());
+		assertFalse(a.dirty());
+		ReelsMeta first = feed.get(4).meta;
+		assertNull(first.mc);
+		assertNull(first.loader);
+		assertEquals("BSL", first.shader);
+		ReelsMeta second = feed.get(3).meta;
+		assertEquals("1.21.4-pre1 +b_2", second.mc);
+		assertEquals("neoforge", second.loader);
+		assertEquals("1.21.4-pre1 +b_2 · NeoForge", second.versionLabel());
+		assertNull(feed.get(2).meta, "17 Zeichen sind zu lang – nichts bleibt übrig");
+		assertNull(feed.get(1).meta);
+		assertNull(feed.get(0).meta, "ein leeres meta ist keines");
+	}
+
+	@Test
+	void eightArgumentPostStillWorksAndHasNoMeta() throws IOException {
+		LocalReelsBackend a = new LocalReelsBackend(tmp, UTC);
+		ReelsPost p = a.post(photo(1), 1280, 720, false, false, "wie bisher", "PixelCST", NOON);
+		assertNotNull(p);
+		assertNull(p.meta);
+		assertEquals(1, a.feed().size());
+		a.flush();
+		assertFalse(feedJson().contains("\"meta\""));
+
+		// Ein Backend, das nur die acht Angaben kennt, bekommt den Post über die neue Form trotzdem.
+		Reels reels = Reels.forTest(new TrsModules(), a, DIRECT, UTC);
+		Reels.Shot shot = new Reels.Shot(1L, photo(2), null, 1280, 720, null, 0, 0, false, false, false);
+		assertNull(reels.post(shot, "ohne", "PixelCST", NOON + 1).meta);
+		assertEquals("BSL", reels.post(shot, "mit", "PixelCST", NOON + 2, new ReelsMeta(null, null, "BSL", null)).meta.shader);
+	}
+
+	@Test
+	void copyKeepsMeta() {
+		ReelsPost p = new ReelsPost();
+		p.id = "20261113-120000-0001";
+		p.meta = new ReelsMeta("26.2", "quilt", "BSL", "Pack");
+		ReelsComment c = new ReelsComment("A", "text", 5);
+		c.id = "20261113-120000-0002";
+		c.replyTo = "20261113-120000-0003";
+		c.editedAt = Long.valueOf(9);
+		c.seen = Boolean.TRUE;
+		p.comments.add(c);
+		ReelsPost q = p.copy();
+		assertNotSame(p.meta, q.meta);
+		assertEquals("26.2", q.meta.mc);
+		assertEquals("quilt", q.meta.loader);
+		assertEquals("BSL", q.meta.shader);
+		assertEquals("Pack", q.meta.pack);
+		ReelsComment d = q.comments.get(0);
+		assertNotSame(c, d);
+		assertEquals(c.id, d.id);
+		assertEquals(c.replyTo, d.replyTo);
+		assertEquals(c.editedAt, d.editedAt);
+		assertEquals(c.seen, d.seen);
+		assertEquals("text", d.text);
+		assertNull(new ReelsPost().copy().meta);
+	}
+
+	// --- Der Dienst: sichern nur, wenn sich etwas geändert hat; Gedächtnis der Sitzung ---
+
+	@Test
+	void repliesEditsSeenAndProtectionAreSavedRightAway() throws IOException {
+		LocalReelsBackend a = new LocalReelsBackend(tmp, UTC);
+		final int[] jobs = {0};
+		Reels reels = Reels.forTest(new TrsModules(), a, new Executor() {
+			@Override
+			public void execute(Runnable command) {
+				jobs[0]++;
+				command.run();
+			}
+		}, UTC);
+		Reels.Shot shot = new Reels.Shot(1L, photo(1), null, 1280, 720, null, 0, 0, false, false, false);
+		ReelsPost p = reels.post(shot, "", "PixelCST", NOON - DAY, new ReelsMeta("26.2", "fabric", null, null));
+		assertEquals(1, jobs[0]);
+		ReelsComment top = reels.comment(p.id, "PixelCST", "oben", NOON - DAY + 1);
+		ReelsComment reply = reels.reply(p.id, top.id, "Steve_Baut", "Antwort", NOON - DAY + 2);
+		assertEquals(top.id, reply.replyTo);
+		assertEquals(3, jobs[0]);
+		assertFalse(a.dirty(), "die Antwort ist schon gesichert");
+		assertNull(reels.reply(p.id, top.id, "Steve_Baut", " ", NOON));
+		assertEquals(3, jobs[0], "ohne Änderung wird nichts gesichert");
+
+		assertNotNull(reels.editComment(p.id, top.id, "PixelCST", "oben!", NOON - DAY + 3));
+		assertEquals(4, jobs[0]);
+		assertNotNull(reels.editComment(p.id, top.id, "PixelCST", "oben!", NOON - DAY + 4));
+		assertNull(reels.editComment(p.id, top.id, "Steve_Baut", "fremd", NOON - DAY + 4));
+		assertEquals(4, jobs[0], "unverändert oder abgelehnt: nichts zu sichern");
+
+		assertEquals(1, reels.markPingsSeen(p.id, "PixelCST"));
+		assertEquals(5, jobs[0]);
+		assertEquals(0, reels.markPingsSeen(p.id, "PixelCST"));
+		assertEquals(5, jobs[0]);
+
+		reels.noteClock(NOON);
+		assertEquals(6, jobs[0], "der erste Blick des Tages wird gleich gesichert");
+		assertTrue(feedJson().contains("\"clockDay\": \"2026-11-13\""), feedJson());
+		reels.noteClock(NOON + 1000);
+		assertEquals(6, jobs[0]);
+
+		assertSame(StreakGuard.Result.ALREADY, pauseTwice(reels));
+		assertEquals(7, jobs[0], "nur das gelungene Einlösen wird gesichert");
+		assertTrue(feedJson().contains("\"freezes\""));
+		assertFalse(a.dirty());
+		assertEquals(ReelsTime.civilDay("2026-11-13"), reels.epochDay(NOON));
+	}
+
+	private static StreakGuard.Result pauseTwice(Reels reels) {
+		assertSame(StreakGuard.Result.OK, reels.protect(false, NOON));
+		return reels.protect(false, NOON);
+	}
+
+	@Test
+	void pingAnnouncementAndRescueHintAreRememberedPerSession() {
+		Reels reels = Reels.forTest(new TrsModules(), new LocalReelsBackend(null, UTC), DIRECT, UTC);
+		assertFalse(reels.announcePings(0), "nichts zu melden");
+		assertTrue(reels.announcePings(2), "einmal nach dem Spielstart");
+		assertFalse(reels.announcePings(2), "nicht bei jedem Herausholen");
+		assertTrue(reels.announcePings(3), "wieder, wenn eine dazukommt");
+		assertFalse(reels.announcePings(1), "gesehen: weniger");
+		assertTrue(reels.announcePings(2), "und wieder eine neue");
+
+		assertTrue(reels.hintRescue(20770L));
+		assertFalse(reels.hintRescue(20770L), "einmal am Tag");
+		assertTrue(reels.hintRescue(20771L));
+
+		Reels fresh = Reels.forTest(new TrsModules(), new LocalReelsBackend(null, UTC), DIRECT, UTC);
+		assertTrue(fresh.announcePings(2), "ein neuer Dienst fängt neu an");
+		assertTrue(fresh.hintRescue(20771L));
+	}
+
+	@Test
+	void aBackendWithoutTheNewAbilitiesStillWorks() throws IOException {
+		final LocalReelsBackend real = new LocalReelsBackend(null, UTC);
+		// So sieht ein Backend aus, das nur die erste Fassung der Schnittstelle kennt.
+		ReelsBackend plain = new ReelsBackend() {
+			@Override
+			public List<ReelsPost> feed() {
+				return real.feed();
+			}
+
+			@Override
+			public ReelsPost post(String photoFileName, int width, int height, boolean portrait, boolean selfie, String caption,
+					String author, long now) {
+				return real.post(photoFileName, width, height, portrait, selfie, caption, author, now);
+			}
+
+			@Override
+			public boolean toggleLike(String postId) {
+				return real.toggleLike(postId);
+			}
+
+			@Override
+			public ReelsComment comment(String postId, String author, String text, long now) {
+				return real.comment(postId, author, text, now);
+			}
+
+			@Override
+			public int streak(long now) {
+				return real.streak(now);
+			}
+
+			@Override
+			public int streakAfterPost(long now) {
+				return real.streakAfterPost(now);
+			}
+
+			@Override
+			public Path photoFile(ReelsPost post) {
+				return null;
+			}
+
+			@Override
+			public Path newPhotoFile(String id) {
+				return null;
+			}
+
+			@Override
+			public void flush() {
+			}
+		};
+		ReelsPost p = plain.post(photo(1), 1280, 720, false, false, "", "A", NOON, new ReelsMeta("26.2", "fabric", "BSL", null));
+		assertNotNull(p);
+		assertNull(p.meta, "die Angaben fallen weg, der Post kommt trotzdem an");
+		ReelsComment top = plain.comment(p.id, "A", "oben", NOON);
+		ReelsComment reply = plain.reply(p.id, top.id, "B", "Antwort", NOON);
+		assertNotNull(reply);
+		assertNull(reply.replyTo, "ohne Antworten: ein Kommentar der obersten Ebene");
+		assertNull(plain.editComment(p.id, top.id, "A", "neu", NOON));
+		assertEquals(0, plain.markPingsSeen(p.id, "A"));
+		assertSame(StreakGuard.NONE, plain.streakGuard(NOON));
+		assertSame(StreakGuard.Result.UNAVAILABLE, plain.protect(false, NOON));
+		assertSame(StreakGuard.Result.UNAVAILABLE, plain.protect(true, NOON));
+		plain.noteClock(NOON);
+		assertFalse(StreakGuard.NONE.canPauseToday || StreakGuard.NONE.canRescueYesterday || StreakGuard.NONE.rescueOffered);
+		Reels reels = Reels.forTest(new TrsModules(), plain, DIRECT, UTC);
+		reels.noteClock(NOON);
+		assertSame(StreakGuard.Result.UNAVAILABLE, reels.protect(false, NOON));
+	}
 }
