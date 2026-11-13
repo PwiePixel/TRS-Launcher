@@ -45,6 +45,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -342,6 +343,8 @@ public final class PhoneUi extends UiScreen {
 	private int unseenPings;
 	private List<ReelsPost> pingFeed;
 	private boolean pingsKnown;
+	/** Text der Meldung zu Erwähnungen und Antworten, solange sie stehen oder warten kann (sonst null). */
+	private String pingNote;
 	/** Zahl der ungesehenen unter dem Post im Bild – gerechnet für diesen Feed und diesen Post. */
 	private int badgeCount;
 	private List<ReelsPost> badgeFeed;
@@ -773,7 +776,9 @@ public final class PhoneUi extends UiScreen {
 		commentsPostId = post.id;
 		resetComments();
 		commentInput.setFocused(true);
-		reels.markPingsSeen(post.id, host.playerName());
+		String me = host.playerName();
+		// Ist damit alles gesehen, hat sich auch die Meldung dazu erledigt.
+		if (reels.markPingsSeen(post.id, me) > 0 && Pings.unseen(reels.backend().feed(), me) == 0) dropPingNote();
 		host.click();
 	}
 
@@ -1129,7 +1134,22 @@ public final class PhoneUi extends UiScreen {
 				openPing();
 			}
 		};
+		pingNote = text;
 		announce(text, open);
+	}
+
+	/** Die Meldung zu Erwähnungen und Antworten wegnehmen, falls sie noch steht oder wartet. */
+	private void dropPingNote() {
+		String text = pingNote;
+		pingNote = null;
+		if (text == null) return;
+		if (text.equals(toast)) {
+			toast = null;
+			toastAction = null;
+		}
+		for (Iterator<Note> it = toastQueue.iterator(); it.hasNext(); ) {
+			if (text.equals(it.next().text)) it.remove();
+		}
 	}
 
 	/** Klick auf die Meldung: zum Post mit der ältesten ungesehenen Erwähnung bzw. Antwort und seine Kommentare öffnen. */
@@ -1140,8 +1160,7 @@ public final class PhoneUi extends UiScreen {
 		int i = hit == null ? -1 : FeedQuery.indexOf(shown, hit.postId);
 		if (i < 0) return;
 		// Die Meldung hat ihren Dienst getan.
-		toast = null;
-		toastAction = null;
+		dropPingNote();
 		closeSheet();
 		closeComments();
 		pager.to(i);

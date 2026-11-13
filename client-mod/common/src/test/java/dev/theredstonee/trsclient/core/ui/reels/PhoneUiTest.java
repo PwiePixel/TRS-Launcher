@@ -5858,6 +5858,7 @@ class PhoneUiTest {
 		click(ui, "comment");
 		assertEquals(PhoneUi.View.COMMENTS, ui.testView());
 		assertEquals(0, ui.testUnseenPings());
+		assertNull(ui.testToast(), "alles gesehen: auch die Meldung dazu ist weg");
 		frame(ui);
 		keys(ui, UiKey.ESCAPE, 1);
 		RecCanvas c = frame(ui);

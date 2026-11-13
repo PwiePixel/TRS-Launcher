@@ -7,6 +7,7 @@ import dev.theredstonee.trsclient.core.reels.FeedSort;
 import dev.theredstonee.trsclient.core.reels.LocalReelsBackend;
 import dev.theredstonee.trsclient.core.reels.PhoneHold;
 import dev.theredstonee.trsclient.core.reels.Reels;
+import dev.theredstonee.trsclient.core.reels.ReelsComment;
 import dev.theredstonee.trsclient.core.reels.ReelsMeta;
 import dev.theredstonee.trsclient.core.reels.ReelsPost;
 import dev.theredstonee.trsclient.core.ui.Canvas;
@@ -37,7 +38,8 @@ import java.util.concurrent.Executor;
 
 /**
  * Entwickler-Werkzeug (kein normaler Test): zeichnet das MC-Reels-Handy ohne Spiel in PNG-Dateien – zum Vergleichen mit
- * den freigegebenen Bildern (Arme, Gehäuse, Feed, Kommentare, die Blätter „Bild“, „Feed“ und „Streak“, die Marken am
+ * den freigegebenen Bildern (Arme, Gehäuse, Feed, Kommentare – auch beim Antworten, mit Namensvorschlägen und beim
+ * Bearbeiten –, die Marke und die Meldung zu einer Erwähnung, die Blätter „Bild“, „Feed“ und „Streak“, die Marken am
  * Post, verschiedene Fenstergrößen und GUI-Skalierungen). Geklickt wird dabei nie auf „Bild kopieren“ oder „Ordner
  * öffnen“ – das Werkzeug fasst weder die Zwischenablage noch den Dateimanager an. Die
  * Zeichenfläche ist eine einfache Software-Umsetzung von {@link Canvas}; die Schrift ist nur ähnlich breit wie die des
@@ -293,6 +295,8 @@ class PhoneRenderTool {
 				return dev.theredstonee.trsclient.core.screenshot.ImageClipboard.Result.UNSUPPORTED;
 			}
 			@Override public java.util.Collection<String> friendNames() { return null; }
+			// Ausgedachte Spieler auf dem „Server“ – für die Namensvorschläge in den Kommentaren.
+			@Override public java.util.List<String> onlinePlayers() { return java.util.Arrays.asList("Rotkaeppchen", "Robin_Hood", "Rosalinde"); }
 		};
 	}
 
@@ -446,6 +450,61 @@ class PhoneRenderTool {
 			sheetShot(rescue, modules, bg, out, "blatt-streak-sicher-" + tag, sizes[0], hold, slim, PhoneUi.Sheet.STREAK, 2);
 			sheetShot(rescue, modules, bg, out, "blatt-streak-retten-" + tag + "-854", sizes[1], hold, slim, PhoneUi.Sheet.STREAK, 0);
 		}
+		commentShots(modules, backend, bg, out, slim, now);
+	}
+
+	/**
+	 * Kommentare mit einem Faden unter dem neuesten Post: erst der Feed mit der Marke am Kommentar-Symbol und der Meldung
+	 * zu einer Erwähnung, dann das Blatt – schlicht, beim Antworten, mit Namensvorschlägen und beim Bearbeiten.
+	 */
+	private void commentShots(TrsModules modules, LocalReelsBackend backend, BufferedImage bg, Path out, boolean slim, long now)
+			throws Exception {
+		Executor direct = new Executor() {
+			@Override
+			public void execute(Runnable r) {
+				r.run();
+			}
+		};
+		ReelsPost post = backend.feed().get(0);
+		ReelsComment first = backend.comment(post.id, "Rotkaeppchen", "Wie süß! Wo hast du den gefunden?", now - 50000L);
+		ReelsComment mine = backend.reply(post.id, first.id, "PixelDEV_CAM", "Im Bambuswald hinter dem Dorf", now - 40000L);
+		backend.editComment(post.id, mine.id, "PixelDEV_CAM", "Im Bambuswald hinter dem Dorf, gleich am Fluss.", now - 39000L);
+		ReelsComment theirs = backend.reply(post.id, first.id, "Steve_Baut", "@PixelDEV_CAM zeigst du mir den Weg?", now - 30000L);
+		backend.comment(post.id, "Du", "Bin gleich da.", now - 20000L);
+		backend.comment(post.id, "PixelDEV_CAM", "Kommt alle vorbei, @Rotkaeppchen und @Steve_Baut!", now - 10000L);
+		int[][] sizes = {{1920, 1080, 2}, {854, 480, 1}};
+		for (PhoneHold hold : PhoneHold.values()) {
+			String tag = hold == PhoneHold.LANDSCAPE ? "quer" : "hochkant";
+			// Je Bild ein neuer Dienst: die Meldung kommt nur einmal je Spielstart.
+			shot(Reels.forTest(modules, backend, direct, TimeZone.getDefault()), modules, bg, out, "ping-" + tag, 1920, 1080, 2, hold, slim, false);
+		}
+		Reels reels = Reels.get();
+		for (PhoneHold hold : PhoneHold.values()) {
+			for (int[] s : sizes) {
+				String tag = (hold == PhoneHold.LANDSCAPE ? "quer" : "hochkant") + (s[0] == 1920 ? "" : "-" + s[0]);
+				commentShot(reels, modules, bg, out, "kommentare-faden-" + tag, s, hold, slim, 0, theirs.id, mine.id);
+				commentShot(reels, modules, bg, out, "kommentare-antwort-" + tag, s, hold, slim, 1, theirs.id, mine.id);
+				commentShot(reels, modules, bg, out, "kommentare-namen-" + tag, s, hold, slim, 2, theirs.id, mine.id);
+				commentShot(reels, modules, bg, out, "kommentare-bearbeiten-" + tag, s, hold, slim, 3, theirs.id, mine.id);
+			}
+		}
+	}
+
+	/**
+	 * Das Kommentar-Blatt: {@code state} 0 schlicht, 1 beim Antworten auf {@code replyId}, 2 dazu ein getippter
+	 * Namensanfang (Vorschläge und Hinweis), 3 beim Bearbeiten von {@code editId}.
+	 */
+	private void commentShot(Reels reels, TrsModules modules, BufferedImage bg, Path out, String name, int[] size, PhoneHold hold,
+			boolean slim, int state, String replyId, String editId) throws Exception {
+		modules.reels.hold.set(hold);
+		PhoneUi ui = new PhoneUi(reels, host(size[0], size[1], size[2], slim));
+		pump(ui, size[0], size[1], size[2], 1);
+		ui.keyPressed(0, UiKey.ENTER, false);
+		pump(ui, size[0], size[1], size[2], 1);
+		if (state == 1 || state == 2) ui.startReply(replyId);
+		if (state == 2) for (char ch : "und @Ro".toCharArray()) ui.inputChar(ch);
+		if (state == 3) ui.startEdit(editId);
+		write(ui, bg, out, name, size[0], size[1], size[2]);
 	}
 
 	/** Post mit eigener Kopie des Fotos, wahlweise mit Angaben, womit es aufgenommen wurde. */

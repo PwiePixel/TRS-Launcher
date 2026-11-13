@@ -136,7 +136,8 @@ final class CommentsView {
 		}
 		if (ui.commentNote()) {
 			int mN = PhoneText.scale(19, l.q);
-			List<String> lines = PhoneText.wrap(c, I18n.tr("reels.comment.local"), mN, width, land ? 1 : 2);
+			// Bei 1080p eine Zeile quer und zwei hochkant; in kleinen Fenstern eine mehr, statt den Satz zu kürzen.
+			List<String> lines = PhoneText.wrap(c, I18n.tr("reels.comment.local"), mN, width, land ? 2 : 3);
 			int noteH = lines.isEmpty() ? 0 : (lines.size() - 1) * LINE * mN + PhoneText.height(mN);
 			int y = top - p(6) - noteH;
 			// Der Hinweis ist das Erste, was geht: er bleibt nur, wenn darüber noch ein Kommentar Platz hat.
