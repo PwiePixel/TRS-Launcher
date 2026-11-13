@@ -74,6 +74,10 @@ public final class ReelsHooks {
 	private static boolean cameraHookSeen;
 	private static boolean effectsHookSeen;
 	private static boolean backdropSeen;
+	/^* Selbsttest: umgedrehte Bilder, über die sich die normale Sicht nicht legen ließ (Größe passte nicht). *^/
+	private static int backdropMisses;
+	/^* Selbsttest: umgedrehte Bilder, in denen das Handy schon weg war. *^/
+	private static int turnedWithoutPhone;
 
 	/^*
 	 * Abstand der Selfie-Kamera vor dem Gesicht (Blöcke): Kopf und Oberkörper im Bild, der Kopf nimmt hochkant gut die
@@ -99,6 +103,9 @@ public final class ReelsHooks {
 	/^* Selfie: Kopie des letzten Bilds der normalen Sicht (auf der Grafikkarte) für den Platz hinter dem Handy. *^/
 	private static GpuTexture backdrop;
 	private static boolean backdropValid;
+	/^* Größe des Fensters, als die Kopie angelegt wurde – ändert sie sich, wird die normale Sicht neu gesichert. *^/
+	private static int backdropWindowW;
+	private static int backdropWindowH;
 	/^* Die Kopie ließ sich nicht anlegen oder zurückspielen: dann zeigt das Selfie wie früher auch hinter dem Handy. *^/
 	private static boolean backdropBroken;
 	/^* Hat sich die Kamera des Spiels in diesem Bild zum Spieler umgedreht? (Gesetzt bei der Kamera-Ausrichtung.) *^/
@@ -228,7 +235,10 @@ public final class ReelsHooks {
 			TrsClient.LOGGER.warn("MC-Reels: Aufräumen fehlgeschlagen", e);
 		}
 		dropFrames();
-		releaseBackdrop();
+		// Verschwindet der Bildschirm mitten in einem Bild, für das sich die Kamera schon zum Spieler umgedreht hat (etwas
+		// anderes ersetzt ihn, während die Oberfläche vorbereitet wird), braucht beforeGui() die normale Sicht noch dieses
+		// eine Mal: es legt sie über das umgedrehte Bild und gibt die Kopie dann frei.
+		if (!(selfieFrame && backdropValid)) releaseBackdrop();
 		restoreView();
 	}
 
@@ -294,6 +304,13 @@ public final class ReelsHooks {
 		// Während einer Kamera-Fahrt gar nicht: sie bestimmt das Bild allein.
 		if ((!backdropValid && !backdropBroken) || cameraRide()
 				|| dev.theredstonee.trsclient.cinematic.CinematicHooks.frame() != null) return 0f;
+		// Fenstergröße geändert (Ziehen, F11): die Kopie passt nicht mehr auf das Hauptbild, das Minecraft gleich neu
+		// anlegt. Dieses Bild bleibt deshalb normal und wird in beforeGui() neu gesichert – sonst stünde die eigene Figur
+		// ein Bild lang hinter dem Handy.
+		if (backdropValid && (backdropWindowW != Mc.window().getWidth() || backdropWindowH != Mc.window().getHeight())) {
+			backdropValid = false;
+			return 0f;
+		}
 		selfieFrame = true;
 		return SELFIE_DISTANCE;
 	}
@@ -320,10 +337,19 @@ public final class ReelsHooks {
 		boolean selfie = phone != null && phone.selfieActive();
 		// Kein Selfie mehr: beim nächsten Umschalten wird die normale Sicht neu gesichert.
 		if (!selfie && !turned) backdropValid = false;
+		// Eine Kopie, die closed() für ein umgedrehtes Bild aufgehoben hat und die doch niemand mehr braucht.
+		if (phone == null && !turned && backdrop != null) releaseBackdrop();
 		if (!turned && !selfie && !wantPhoto && !wantFinder) return;
 		try {
 			Minecraft mc = Mc.mc();
 			if (mc.level == null || phone == null) {
+				// Das Handy ist in diesem Bild verschwunden, die Welt aber schon umgedreht gezeichnet (siehe closed()):
+				// die normale Sicht noch einmal darüberlegen, dann die Kopie freigeben.
+				if (turned && phone == null) {
+					turnedWithoutPhone++;
+					if (mc.level != null) restoreBackdrop(Mc.mainRenderTarget());
+				}
+				if (phone == null) releaseBackdrop();
 				dropFrames();
 				return;
 			}
@@ -406,6 +432,8 @@ public final class ReelsHooks {
 						source.getFormat(), w, h, 1, 1);
 			}
 			RenderSystem.getDevice().createCommandEncoder().copyTextureToTexture(source, backdrop, 0, 0, 0, 0, 0, w, h);
+			backdropWindowW = Mc.window().getWidth();
+			backdropWindowH = Mc.window().getHeight();
 			backdropValid = true;
 		} catch (RuntimeException | LinkageError e) {
 			backdropFailed(e);
@@ -423,6 +451,7 @@ public final class ReelsHooks {
 					|| saved.getFormat() != target.getFormat()) {
 				// Fenstergröße geändert: das nächste Bild zeigt die normale Sicht und wird neu gesichert.
 				backdropValid = false;
+				backdropMisses++;
 				return;
 			}
 			RenderSystem.getDevice().createCommandEncoder().copyTextureToTexture(saved, target, 0, 0, 0, 0, 0,
@@ -486,6 +515,21 @@ public final class ReelsHooks {
 	/^* Hat der Haken der Effekte vor dem Gesicht schon einmal gegriffen (Selfie ohne Feuer-/Wasser-Schleier)? *^/
 	public static boolean effectsHookSeen() {
 		return effectsHookSeen;
+	}
+
+	/^* Selbsttest: wie oft ein umgedrehtes Bild ohne die normale Sicht dahinter blieb (Größe der Kopie passte nicht). *^/
+	public static int backdropMisses() {
+		return backdropMisses;
+	}
+
+	/^* Selbsttest: wie oft ein Bild schon umgedreht war, als das Handy verschwand. *^/
+	public static int turnedWithoutPhone() {
+		return turnedWithoutPhone;
+	}
+
+	/^* Selbsttest: gilt die gesicherte normale Sicht gerade (Selfie)? *^/
+	public static boolean backdropValid() {
+		return backdropValid;
 	}
 
 	/^* Lag beim Selfie schon einmal die normale Sicht wieder hinter dem Handy? *^/
