@@ -73,6 +73,8 @@ public final class ReelsHooks {
 	private static boolean frameHookSeen;
 	private static boolean cameraHookSeen;
 	private static boolean effectsHookSeen;
+	private static boolean debugCrosshairHookSeen;
+	private static int debugCrosshairsHidden;
 	private static boolean backdropSeen;
 	/^* Selbsttest: umgedrehte Bilder, über die sich die normale Sicht nicht legen ließ (Größe passte nicht). *^/
 	private static int backdropMisses;
@@ -289,6 +291,17 @@ public final class ReelsHooks {
 	public static boolean hideBlockOutline() {
 		outlineHookSeen = true;
 		return phoneOpen();
+	}
+
+	/^*
+	 * Kein Achsenkreuz der Debug-Anzeige (F3), solange das Handy draußen ist: Minecraft zeichnet es in das Bild der Welt
+	 * – es läge sonst mitten im Sucher und auf jedem Foto (ReelsCrosshairMixin).
+	 *^/
+	public static boolean hideDebugCrosshair() {
+		debugCrosshairHookSeen = true;
+		if (!phoneOpen()) return false;
+		debugCrosshairsHidden++;
+		return true;
 	}
 
 	/^*
@@ -515,6 +528,16 @@ public final class ReelsHooks {
 	/^* Hat der Haken der Effekte vor dem Gesicht schon einmal gegriffen (Selfie ohne Feuer-/Wasser-Schleier)? *^/
 	public static boolean effectsHookSeen() {
 		return effectsHookSeen;
+	}
+
+	/^* Hat der Haken des Debug-Achsenkreuzes (F3) schon einmal gegriffen? *^/
+	public static boolean debugCrosshairHookSeen() {
+		return debugCrosshairHookSeen;
+	}
+
+	/^* Wie oft das Debug-Achsenkreuz tatsächlich weggelassen wurde (Handy draußen, F3 offen). *^/
+	public static int debugCrosshairsHidden() {
+		return debugCrosshairsHidden;
 	}
 
 	/^* Selbsttest: wie oft ein umgedrehtes Bild ohne die normale Sicht dahinter blieb (Größe der Kopie passte nicht). *^/
