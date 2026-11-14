@@ -13,14 +13,21 @@ import dev.theredstonee.trsclient.core.cinematic.Cinematic;
 import dev.theredstonee.trsclient.core.emote.EmoteController;
 import dev.theredstonee.trsclient.core.module.ReelsModules;
 import dev.theredstonee.trsclient.core.module.TrsModules;
+import dev.theredstonee.trsclient.core.reels.InstanceName;
+import dev.theredstonee.trsclient.core.reels.Mentions;
 import dev.theredstonee.trsclient.core.reels.PhotoFrame;
 import dev.theredstonee.trsclient.core.reels.Reels;
+import dev.theredstonee.trsclient.core.reels.ReelsMeta;
+import dev.theredstonee.trsclient.core.reels.ShaderName;
 import dev.theredstonee.trsclient.core.ui.TextureRef;
 import dev.theredstonee.trsclient.core.ui.reels.PhoneUi;
 import dev.theredstonee.trsclient.online.EmoteHooks;
 import dev.theredstonee.trsclient.screen.ReelsScreen;
+import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.CameraType;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.multiplayer.ClientPacketListener;
+import net.minecraft.client.multiplayer.PlayerInfo;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.client.resources.sounds.SimpleSoundInstance;
 import net.minecraft.sounds.SoundEvents;
@@ -28,6 +35,8 @@ import net.minecraft.world.entity.player.PlayerModelPart;
 import net.minecraft.world.entity.player.PlayerModelType;
 
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
 /^*
@@ -53,8 +62,12 @@ import java.util.concurrent.ConcurrentLinkedQueue;
  * dem Handy weiter: die Kamera des Handys ließe sich nicht drehen, das Selfie zeigte nicht aufs Gesicht). Während einer
  * Kamera-Fahrt oder der freien Kamera bleibt das Handy in der Tasche.
  *
+ * <p><b>Angaben am Foto:</b> Version und Loader kommen vom laufenden Spiel, der Name des Shaderpakets per Reflection
+ * von Iris ({@link ShaderName}), der Name der Instanz aus der {@code instance.json} des TRS Launchers
+ * ({@link InstanceName}) – die wird nur gelesen, wenn das Handy herausgeholt wird, und dann im Hintergrund.
+ *
  * <p>Alles hier läuft im Render-/Spiel-Thread – bis auf die Rückgabe der ausgelesenen Pixel, deren Thread nicht
- * festgelegt ist (deshalb die Warteschlange).
+ * festgelegt ist (deshalb die Warteschlange), und das Lesen des Instanz-Namens (Hintergrund-Thread von MC-Reels).
  *^/
 public final class ReelsHooks {
 	/^*
@@ -115,6 +128,13 @@ public final class ReelsHooks {
 	/^* Leichter Weichzeichner hinter dem Handy (Versuch, ab Werk aus): {@code -Dtrsclient.reels.blur=true}. *^/
 	private static boolean blur = Boolean.getBoolean("trsclient.reels.blur");
 
+	/^* Der Spielordner (beim Start gemerkt): daneben liegt beim TRS Launcher die {@code instance.json}. *^/
+	private static Path gameDir;
+	/^* Name der Instanz im TRS Launcher oder null – bei jedem Herausholen des Handys im Hintergrund neu gelesen. *^/
+	private static volatile String instanceName;
+	/^* Selbsttest: feste Angaben am Foto (null = die echten). *^/
+	private static volatile ReelsMeta testMeta;
+
 	private ReelsHooks() {
 	}
 
@@ -123,6 +143,8 @@ public final class ReelsHooks {
 	 * des Spiels hängt nicht daran.
 	 *^/
 	public static void init(TrsModules modules, Path gameDir, Path configDir) {
+		// Nur gemerkt – gelesen wird erst, wenn das Handy herausgeholt wird (das Modul ist ab Werk aus).
+		ReelsHooks.gameDir = gameDir;
 		try {
 			String custom = System.getProperty("trsclient.reels.dir");
 			Path dir = custom != null && !custom.trim().isEmpty() ? gameDir.resolve(custom.trim())
@@ -145,6 +167,13 @@ public final class ReelsHooks {
 		if (cameraRide()) return false;
 		try {
 			dropFrames();
+			// Name der Instanz für die Angaben am Foto: im Hintergrund, lange vor dem ersten Auslösen fertig – und jedes
+			// Mal neu, damit auch eine Instanz stimmt, die bei laufendem Spiel umbenannt wurde.
+			try {
+				reels.worker().execute(ReelsHooks::refreshInstance);
+			} catch (RuntimeException e) {
+				// Der Hintergrund-Thread nimmt nichts mehr an (Spiel wird beendet): der Name bleibt, wie er war.
+			}
 			PhoneUi phone = new PhoneUi(reels, new Host());
 			viewBefore = null;
 			// Ein laufender Freelook endet hier und stellt seine Perspektive von davor zurück – erst danach ist zu sehen,
@@ -158,6 +187,56 @@ public final class ReelsHooks {
 			TrsClient.LOGGER.warn("MC-Reels: Handy lässt sich nicht öffnen", e);
 			restoreView();
 			return false;
+		}
+	}
+
+	/^*
+	 * Name der Instanz neu lesen ({@code <Instanz>/instance.json} neben dem Spielordner – nur, wenn der TRS Launcher das
+	 * Spiel gestartet hat). Wartet auf die Platte: läuft im Hintergrund-Thread von MC-Reels.
+	 *^/
+	private static void refreshInstance() {
+		try {
+			instanceName = InstanceName.read(gameDir, System.getProperty("minecraft.launcher.brand"));
+		} catch (RuntimeException | LinkageError e) {
+			instanceName = null;
+		}
+	}
+
+	/^*
+	 * Womit jetzt gerade ein Foto aufgenommen würde: Minecraft-Version, Loader, Shaderpaket, Instanz. Liest nichts von
+	 * der Platte.
+	 *^/
+	private static ReelsMeta photoMeta() {
+		ReelsMeta forced = testMeta;
+		if (forced != null) return forced.copy();
+		try {
+			dev.theredstonee.trsclient.core.bugreport.BugReports reports = dev.theredstonee.trsclient.core.bugreport.BugReports.get();
+			String mc = reports != null ? reports.mcVersion() : FabricLoader.getInstance().getModContainer("minecraft")
+					.map(c -> c.getMetadata().getVersion().getFriendlyString()).orElse(null);
+			if ("unknown".equals(mc)) mc = null;
+			String loader = FabricLoader.getInstance().isModLoaded("quilt_loader") ? "quilt" : "fabric";
+			return new ReelsMeta(mc, loader, ShaderName.current(), instanceName);
+		} catch (RuntimeException | LinkageError e) {
+			return null;
+		}
+	}
+
+	/^*
+	 * Namen der Spieler, die gerade auf dem Server sind (Namensvorschläge beim Tippen von {@code @}) – nur gültige
+	 * Spielernamen, damit erfundene Einträge der Spielerliste wegfallen. Ohne Verbindung leer.
+	 *^/
+	public static List<String> onlinePlayers() {
+		List<String> names = new ArrayList<>();
+		try {
+			ClientPacketListener connection = Mc.mc().getConnection();
+			if (connection == null) return names;
+			for (PlayerInfo info : connection.getOnlinePlayers()) {
+				String name = info.getProfile().name();
+				if (Mentions.validName(name)) names.add(name);
+			}
+			return names;
+		} catch (RuntimeException e) {
+			return new ArrayList<>();
 		}
 	}
 
@@ -579,6 +658,11 @@ public final class ReelsHooks {
 		blur = on;
 	}
 
+	/^* Selbsttest: solange {@code forced} nicht null ist, trägt jedes neue Foto genau diese Angaben. *^/
+	public static void testMeta(ReelsMeta forced) {
+		testMeta = forced;
+	}
+
 	/^* Was das Handy vom Spiel braucht. *^/
 	private static final class Host implements PhoneUi.Host {
 		@Override
@@ -689,6 +773,22 @@ public final class ReelsHooks {
 		@Override
 		public void close() {
 			if (phoneOpen()) Mc.setScreen(null);
+		}
+
+		/^* Der Spielordner ist im Entwickler-Start nur „.“ – deshalb als fester Pfad. *^/
+		@Override
+		public Path screenshotsDir() {
+			return Mc.mc().gameDirectory.toPath().toAbsolutePath().normalize().resolve("screenshots");
+		}
+
+		@Override
+		public ReelsMeta photoMeta() {
+			return ReelsHooks.photoMeta();
+		}
+
+		@Override
+		public List<String> onlinePlayers() {
+			return ReelsHooks.onlinePlayers();
 		}
 	}
 }
