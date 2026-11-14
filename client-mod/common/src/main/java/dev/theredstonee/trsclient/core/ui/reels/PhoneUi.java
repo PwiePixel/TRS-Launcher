@@ -2151,6 +2151,14 @@ public final class PhoneUi extends UiScreen {
 		return pager.index();
 	}
 
+	/** IDs der Posts, die der Feed gerade zeigt (gefiltert und sortiert), in dieser Reihenfolge. */
+	public List<String> testShown() {
+		refreshFeed();
+		List<String> ids = new ArrayList<String>();
+		for (ReelsPost p : shown) ids.add(p.id);
+		return ids;
+	}
+
 	/**
 	 * Wo eine Stelle des Handys im letzten Bild lag: {x, y, Breite, Höhe} in Fensterpixeln, oder null. Namen:
 	 * {@code phone}, {@code screen}, {@code photo}, {@code heart}, {@code comment}, {@code save}, {@code camera},

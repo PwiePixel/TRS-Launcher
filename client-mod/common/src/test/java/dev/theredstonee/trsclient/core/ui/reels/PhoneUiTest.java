@@ -3703,6 +3703,8 @@ class PhoneUiTest {
 		ui.setFilter(FeedFilter.MINE);
 		RecCanvas c = frame(ui);
 		assertTrue(c.shows("1 / 2") && c.shows("Mein neues"), c.strings().toString());
+		List<ReelsPost> all = backend.feed();
+		assertEquals(java.util.Arrays.asList(all.get(0).id, all.get(2).id), ui.testShown(), "die gezeigte Liste: nur die eigenen, neueste zuerst");
 		ui.inputScroll(0, 0, -1);
 		c = frame(ui);
 		assertEquals(1, ui.testPage());
