@@ -10,13 +10,20 @@ import dev.theredstonee.trsclient.core.config.TrsConfig;
 import dev.theredstonee.trsclient.core.i18n.I18n;
 import dev.theredstonee.trsclient.core.module.TrsModules;
 import dev.theredstonee.trsclient.core.reels.ArmRig;
+import dev.theredstonee.trsclient.core.reels.FeedFilter;
+import dev.theredstonee.trsclient.core.reels.FeedSort;
 import dev.theredstonee.trsclient.core.reels.LocalReelsBackend;
 import dev.theredstonee.trsclient.core.reels.PhoneHold;
 import dev.theredstonee.trsclient.core.reels.PhoneLayout;
 import dev.theredstonee.trsclient.core.reels.PhotoFrame;
 import dev.theredstonee.trsclient.core.reels.Reels;
 import dev.theredstonee.trsclient.core.reels.ReelsBackend;
+import dev.theredstonee.trsclient.core.reels.ReelsComment;
+import dev.theredstonee.trsclient.core.reels.ReelsExport;
+import dev.theredstonee.trsclient.core.reels.ReelsMeta;
 import dev.theredstonee.trsclient.core.reels.ReelsPost;
+import dev.theredstonee.trsclient.core.reels.ReelsTime;
+import dev.theredstonee.trsclient.core.reels.StreakGuard;
 import dev.theredstonee.trsclient.core.ui.UiKey;
 import dev.theredstonee.trsclient.core.ui.reels.PhoneUi;
 import dev.theredstonee.trsclient.core.wardrobe.PngWriter;
@@ -56,6 +63,13 @@ import java.util.TimeZone;
  * (F3) kein Achsenkreuz im Sucher (Bild 18 ansehen); beim Selfie die Fenstergröße ändern (Bild 19: keine eigene Figur
  * hinter dem Handy) und mit der Handy-Taste wegstecken, ohne dass ein umgedrehtes Bild stehen bleibt.
  *
+ * <p>Zuletzt die fünf Erweiterungen, jeweils quer und hochkant mit Bild (21 bis 27d): „Bild speichern“ (echter Klick; die
+ * eine Kopie {@code mc-reels_*.png} im Screenshots-Ordner wird am Ende wieder gelöscht – „Bild kopieren“ und „Ordner
+ * öffnen“ klickt der Test nie, sie griffen in Zwischenablage und Dateimanager des Entwicklers), Angaben am Foto
+ * (Version und Loader vom Spiel; Shaderpaket und Instanz über Posts aus dem Speicher und über
+ * {@link ReelsHooks#testMeta}), Filter und Reihenfolge, Kommentare (bearbeiten mit beweglicher Schreibmarke, antworten,
+ * {@code @}Name mit Vorschlag, Erwähnung mit Marke und Meldung) und der Streak-Schutz („Gestern retten“ mit Nachfrage).
+ *
  * <p>Das Handy wird mit {@link ReelsHooks#open()} geöffnet: die Handy-Taste fragt den echten Tastenzustand ab, den
  * ein Test nicht setzen kann.
  *^/
@@ -76,6 +90,11 @@ public final class ReelsTest {
 	private static final float[][] AIMS = {{0, 24}, {-30, 24}, {-55, 26}, {35, 26}, {-90, 28}, {180, 26}, {0, 42}, {0, 58}};
 	private static final String CAPTION = "Aussicht am Fluss";
 	private static final String SELFIE_CAPTION = "Ich war auch da";
+	private static final String META_CAPTION = "Mit Shaderpaket fotografiert";
+	private static final String REPLY = "am Fluss, gleich hinter dem Hügel";
+	/^* Texte der drei gemalten Test-Posts ({@link #seed}) – daran sind sie später wiederzuerkennen. *^/
+	private static final String[] SEED_CAPTIONS = {"Erste Nacht überstanden – das Haus steht!",
+			"Abendrot über dem Hügel, hochkant fotografiert.", "Schaut mal, wo ich gelandet bin!"};
 	/^* Nach so vielen Ticks bricht der Test ab, statt Gradle hängen zu lassen. *^/
 	private static final int WATCHDOG_TICKS = 14000;
 
@@ -102,6 +121,18 @@ public final class ReelsTest {
 	private int crosshairsHidden;
 	private int backdropMisses;
 	private int turnedWithoutPhone;
+	/^* „Bild speichern“: die Kopie, die der Test im Screenshots-Ordner erwartet (und wieder löscht), und das Foto dazu. *^/
+	private Path exported;
+	private Path exportedTwice;
+	private Path exportedPhoto;
+	private String metaPost;
+	private String foreignMetaPost;
+	private ReelsMeta forcedMeta;
+	private String editedComment;
+	private String pingComment;
+	private int commentScroll;
+	private int pageBefore;
+	private long armedAt;
 
 	public static void install() {
 		ReelsTest test = new ReelsTest();
@@ -316,6 +347,7 @@ public final class ReelsTest {
 			}
 			case 15:
 				// Zweiter Post ist hochkant fotografiert: im Querformat ganz zu sehen (nicht beschnitten).
+				check("ein alter Post ohne Angaben zeigt keine Marken (er sieht aus wie bisher)", noMetaChips());
 				AutoTest.shot(mc, "trsclient-reels-09-quer-feed");
 				next(15);
 				return;
@@ -499,12 +531,18 @@ public final class ReelsTest {
 						&& mc.getUser().getName().equals(top.author) && top.portrait && !top.selfie);
 				check("Streak ist 1 (" + reels.backend().streak(System.currentTimeMillis()) + ")",
 						reels.backend().streak(System.currentTimeMillis()) == 1);
+				ReelsMeta meta = top == null ? null : top.meta;
+				check("das Foto trägt Minecraft " + AutoTest.MC_VERSION + " und den Loader Fabric (" + metaText(meta) + ")", meta != null
+						&& AutoTest.MC_VERSION.equals(meta.mc) && "fabric".equals(meta.loader));
+				check("kein Shaderpaket (kein Iris im Entwickler-Start) und keine Instanz (nicht aus dem TRS Launcher gestartet)",
+						meta != null && meta.shader == null && meta.pack == null);
 				check("zurück im Feed auf Seite 1, mit Meldung „" + ui.testToast() + "“", ui.testView() == PhoneUi.View.FEED
 						&& ui.testPage() == 0 && ui.testToast() != null);
 				next(15);
 				return;
 			}
 			case 39:
+				check("der neue Post zeigt keine Marken (Version und Loader allein sagen nichts)", noMetaChips());
 				AutoTest.shot(mc, "trsclient-reels-14-gepostet");
 				next(15);
 				return;
@@ -1003,6 +1041,720 @@ public final class ReelsTest {
 				AutoTest.shot(mc, "trsclient-reels-20-nach-selfie-weg");
 				next(15);
 				return;
+			case 102: {
+				// ===== Neu: Bild speichern, Angaben am Foto, Filter, Kommentare, Streak-Schutz =====
+				// --- A. „Bild speichern“ (quer; im Bild ist der neueste Post, das Selfie) ---
+				boolean opened = ReelsHooks.open();
+				ui = ReelsHooks.phone();
+				check("Handy geht für die neuen Prüfungen auf (quer)", opened && ui != null && ui.testHold() == PhoneHold.LANDSCAPE);
+				if (ui == null) {
+					finish(mc);
+					return;
+				}
+				next(30);
+				return;
+			}
+			case 103: {
+				int[] screen = spot("screen"), save = spot("save"), comment = spot("comment"), camera = spot("camera");
+				check("quer: „Bild speichern“ " + Arrays.toString(save) + " liegt unter dem Kommentar-Symbol, über dem Kamera-Knopf, ganz"
+						+ " auf dem Bildschirm und ist mindestens 40×40", save[1] >= comment[1] + comment[3]
+						&& save[1] + save[3] <= camera[1] && inside(save, screen) && save[2] >= 40 && save[3] >= 40);
+				clickSpot(mc, "save");
+				check("echter Klick auf „Bild speichern“ öffnet das Blatt „Bild“", ui.testSheet() == PhoneUi.Sheet.SAVE);
+				next(10);
+				return;
+			}
+			case 104: {
+				int[] doIt = ui.testSpot("saveDo"), copy = ui.testSpot("saveCopy"), folder = ui.testSpot("saveFolder");
+				check("das Blatt hat „Bild speichern“, „Bild kopieren“ und „Ordner öffnen“, jeder Knopf mindestens 40 hoch ("
+						+ Arrays.toString(doIt) + ", " + Arrays.toString(copy) + ", " + Arrays.toString(folder) + ")", doIt != null
+						&& copy != null && folder != null && doIt[3] >= 40 && copy[3] >= 40 && folder[3] >= 40);
+				AutoTest.shot(mc, "trsclient-reels-21-quer-speichern");
+				next(15);
+				return;
+			}
+			case 105: {
+				int page = ui.testPage();
+				int[] screen = spot("screen");
+				double gs = Mc.window().getGuiScale();
+				Mc.screen().mouseScrolled((screen[0] + screen[2] / 2.0) / gs, (screen[1] + screen[3] / 4.0) / gs, 0, -1);
+				check("solange das Blatt offen ist, blättert das Mausrad nicht", ui.testPage() == page && ui.testSheet() == PhoneUi.Sheet.SAVE);
+				esc(mc);
+				check("Esc schließt nur das Blatt, das Handy bleibt offen", ui.testSheet() == PhoneUi.Sheet.NONE
+						&& Mc.screen() instanceof dev.theredstonee.trsclient.screen.ReelsScreen && !ui.isClosing());
+				next(10);
+				return;
+			}
+			case 106: {
+				// Die Kopie landet im Screenshots-Ordner des Entwickler-Starts: nur genau diese eine Datei wird vorher (falls
+				// sie von einem abgebrochenen Lauf liegt) und am Ende wieder gelöscht.
+				List<String> shown = ui.testShown();
+				ReelsPost post = byId(reels, shown.isEmpty() ? null : shown.get(Math.min(shown.size() - 1, ui.testPage())));
+				if (post == null) throw new IllegalStateException("kein Post im Bild");
+				Path shots = mc.gameDirectory.toPath().toAbsolutePath().normalize().resolve("screenshots");
+				exported = shots.resolve(ReelsExport.fileName(post.id, 1));
+				exportedTwice = shots.resolve(ReelsExport.fileName(post.id, 2));
+				exportedPhoto = reels.backend().photoFile(post);
+				Files.deleteIfExists(exported);
+				clickSpot(mc, "save");
+				next(10);
+				return;
+			}
+			case 107:
+				clickSpot(mc, "saveDo");
+				next(2);
+				return;
+			case 108: {
+				if (!waitFor(Files.isRegularFile(exported) && ui.testToast() != null && !ui.testSheetBusy(), 20)) return;
+				check("„Bild speichern“ legt die Kopie in den Screenshots-Ordner (" + exported + "), Byte für Byte das Foto",
+						Files.isRegularFile(exported) && exportedPhoto != null
+								&& Arrays.equals(Files.readAllBytes(exported), Files.readAllBytes(exportedPhoto)));
+				check("Meldung „" + ui.testToast() + "“, das Blatt ist zu", I18n.tr("reels.toast.saved").equals(ui.testToast())
+						&& ui.testSheet() == PhoneUi.Sheet.NONE);
+				next(10);
+				return;
+			}
+			case 109:
+				clickSpot(mc, "save");
+				next(10);
+				return;
+			case 110:
+				clickSpot(mc, "saveDo");
+				next(2);
+				return;
+			case 111: {
+				if (!waitFor(I18n.tr("reels.toast.saved.already").equals(ui.testToast()) && !ui.testSheetBusy(), 20)) return;
+				check("noch einmal speichern legt keine zweite Datei an, Meldung „" + ui.testToast() + "“", !Files.exists(exportedTwice)
+						&& Files.isRegularFile(exported) && I18n.tr("reels.toast.saved.already").equals(ui.testToast()));
+				AutoTest.key(mc, Keys.code("key.keyboard.r"));
+				if (ui.testHold() != PhoneHold.PORTRAIT) ui.inputKey(Keys.code("key.keyboard.r"), UiKey.NONE, false);
+				// Drehen, und die Meldung soll auf dem nächsten Bild nicht mehr stehen.
+				next(95);
+				return;
+			}
+			case 112: {
+				int[] screen = spot("screen"), save = spot("save"), comment = spot("comment"), nav = spot("home");
+				check("hochkant: „Bild speichern“ " + Arrays.toString(save) + " liegt unter dem Kommentar-Symbol, über der Leiste und"
+						+ " ganz auf dem Bildschirm", ui.testHold() == PhoneHold.PORTRAIT && save[1] >= comment[1] + comment[3]
+						&& save[1] + save[3] <= nav[1] && inside(save, screen) && save[2] >= 40 && save[3] >= 40);
+				clickSpot(mc, "save");
+				next(10);
+				return;
+			}
+			case 113:
+				check("das Blatt „Bild“ geht auch hochkant auf", ui.testSheet() == PhoneUi.Sheet.SAVE && ui.testSpot("saveDo") != null);
+				AutoTest.shot(mc, "trsclient-reels-21b-hochkant-speichern");
+				next(15);
+				return;
+			case 114:
+				esc(mc);
+				next(10);
+				return;
+			case 115: {
+				// --- B. Angaben am Foto (Shaderpaket, Instanz, Version) ---
+				// Zwei Posts mit Angaben, wie sie mit Iris und aus dem TRS Launcher entstünden – über den Speicher angelegt,
+				// denn im Entwickler-Start gibt es weder Shaderpaket noch Instanz.
+				String self = mc.getUser().getName();
+				long now = System.currentTimeMillis();
+				metaPost = addPost(reels, self, now - 2000L, 2, "Neues Shaderpaket ausprobiert",
+						new ReelsMeta("26.2", "fabric", "Complementary Reimagined r5.5.1", "All the Mods 10 – To the Sky"));
+				foreignMetaPost = addPost(reels, "Steve_Baut", now - 1000L, 0, "Nachts auf dem alten Server",
+						new ReelsMeta("1.21.4", "neoforge", "BSL", null));
+				reels.saveLater();
+				next(10);
+				return;
+			}
+			case 116:
+				check("der Post mit Shaderpaket und Instanz ist im Bild", goTo(mc, metaPost));
+				next(15);
+				return;
+			case 117: {
+				int[] screen = spot("screen"), heart = spot("heart");
+				int[] shader = ui.testSpot("metaShader"), pack = ui.testSpot("metaPack");
+				check("hochkant: Marken für Shaderpaket " + Arrays.toString(shader) + " und Instanz " + Arrays.toString(pack)
+						+ " – auf dem Bildschirm, links der rechten Spalte, in zwei Zeilen", shader != null && pack != null
+						&& inside(shader, screen) && inside(pack, screen) && shader[0] + shader[2] <= heart[0]
+						&& pack[0] + pack[2] <= heart[0] && pack[1] >= shader[1] + shader[3]);
+				AutoTest.shot(mc, "trsclient-reels-22b-hochkant-meta");
+				next(15);
+				return;
+			}
+			case 118:
+				AutoTest.key(mc, Keys.code("key.keyboard.r"));
+				if (ui.testHold() != PhoneHold.LANDSCAPE) ui.inputKey(Keys.code("key.keyboard.r"), UiKey.NONE, false);
+				next(30);
+				return;
+			case 119: {
+				int[] screen = spot("screen"), heart = spot("heart");
+				int[] shader = ui.testSpot("metaShader"), pack = ui.testSpot("metaPack");
+				check("quer: Marken für Shaderpaket " + Arrays.toString(shader) + " und Instanz " + Arrays.toString(pack)
+						+ " – auf dem Bildschirm und links der rechten Spalte", shader != null && pack != null && inside(shader, screen)
+						&& inside(pack, screen) && shader[0] + shader[2] <= heart[0] && pack[0] + pack[2] <= heart[0]);
+				AutoTest.shot(mc, "trsclient-reels-22-quer-meta");
+				next(15);
+				return;
+			}
+			case 120:
+				check("der Post aus einer anderen Version ist im Bild", goTo(mc, foreignMetaPost));
+				next(15);
+				return;
+			case 121: {
+				int[] shader = ui.testSpot("metaShader"), version = ui.testSpot("metaVersion");
+				check("quer: ein Post aus 1.21.4 mit NeoForge zeigt das Shaderpaket " + Arrays.toString(shader) + " und rechts daneben"
+						+ " die Version " + Arrays.toString(version) + ", aber keine Instanz", shader != null && version != null
+						&& version[0] >= shader[0] + shader[2] && ui.testSpot("metaPack") == null);
+				AutoTest.shot(mc, "trsclient-reels-22c-quer-version");
+				next(15);
+				return;
+			}
+			case 122:
+				// Der Weg über den Auslöser, mit festen Angaben statt der echten (die im Entwickler-Start leer bleiben).
+				forcedMeta = new ReelsMeta(AutoTest.MC_VERSION, "fabric", "TRS-Testshader v1", "TRS-Testinstanz");
+				ReelsHooks.testMeta(forcedMeta);
+				clickSpot(mc, "camera");
+				next(10);
+				return;
+			case 123:
+				if (!waitFor(ui.testViewfinder() != null, 80)) return;
+				clickSpot(mc, "camShutter");
+				next(5);
+				return;
+			case 124:
+				if (!waitFor(ui.testView() == PhoneUi.View.COMPOSE, 100)) return;
+				for (int i = 0; i < META_CAPTION.length(); i++) ui.inputChar(META_CAPTION.charAt(i));
+				next(15);
+				return;
+			case 125: {
+				if (!waitFor(ui.testPostArmed(), 20)) return;
+				AutoTest.key(mc, Keys.code("key.keyboard.enter"));
+				List<ReelsPost> feed = reels.backend().feed();
+				ReelsPost top = feed.isEmpty() ? null : feed.get(0);
+				ReelsMeta m = top == null ? null : top.meta;
+				check("ein Foto über den Auslöser trägt genau die Angaben des Augenblicks (" + metaText(m) + ")", top != null
+						&& META_CAPTION.equals(top.caption) && m != null && forcedMeta.mc.equals(m.mc) && forcedMeta.loader.equals(m.loader)
+						&& forcedMeta.shader.equals(m.shader) && forcedMeta.pack.equals(m.pack));
+				ReelsHooks.testMeta(null);
+				// Die Meldung „Gepostet!“ soll auf den nächsten Bildern nicht mehr stehen.
+				next(95);
+				return;
+			}
+			case 126: {
+				String json = feedJson(reels);
+				LocalReelsBackend fresh = new LocalReelsBackend(dir(reels), TimeZone.getDefault());
+				int seeded = 0, withMeta = 0;
+				boolean seededClean = true, shotsMarked = true;
+				for (ReelsPost p : fresh.feed()) {
+					if (Arrays.asList(SEED_CAPTIONS).contains(p.caption)) {
+						seeded++;
+						seededClean &= p.meta == null;
+					} else {
+						withMeta++;
+						shotsMarked &= p.meta != null && p.meta.mc != null && p.meta.loader != null;
+					}
+				}
+				check("feed.json enthält die Angaben der " + withMeta + " neuen Posts, die drei alten Test-Posts haben keine",
+						json.contains("\"meta\"") && json.contains("Complementary Reimagined r5.5.1") && seeded == 3 && seededClean
+								&& withMeta == 5 && shotsMarked);
+				next(5);
+				return;
+			}
+			case 127: {
+				// --- C. Filter und Reihenfolge ---
+				int[] screen = spot("screen"), chip = spot("filterChip"), pos = spot("pos");
+				check("quer: die Marke „Alle · Neu“ " + Arrays.toString(chip) + " steht rechts neben der Seitenzahl und links vom"
+						+ " Titel, ihre Klickfläche ist mindestens 40 hoch", chip[0] >= pos[0] + pos[2]
+						&& chip[0] + chip[2] <= screen[0] + screen[2] / 2 && chip[3] >= 40 && inside(chip, screen));
+				clickSpot(mc, "filterChip");
+				check("echter Klick auf die Marke öffnet das Blatt „Feed“", ui.testSheet() == PhoneUi.Sheet.FILTER);
+				next(10);
+				return;
+			}
+			case 128:
+				AutoTest.shot(mc, "trsclient-reels-23-quer-filter");
+				next(15);
+				return;
+			case 129:
+				// Drehen geht auch mit offenem Blatt.
+				AutoTest.key(mc, Keys.code("key.keyboard.r"));
+				if (ui.testHold() != PhoneHold.PORTRAIT) ui.inputKey(Keys.code("key.keyboard.r"), UiKey.NONE, false);
+				next(30);
+				return;
+			case 130: {
+				int[] screen = spot("screen"), chip = spot("filterChip"), pos = spot("pos");
+				check("hochkant: die Marke " + Arrays.toString(chip) + " steht unter Seitenzahl und Titel, ihre Klickfläche ist"
+						+ " mindestens 40 hoch; das Blatt bleibt beim Drehen offen", ui.testHold() == PhoneHold.PORTRAIT
+						&& chip[1] >= pos[1] + pos[3] && chip[3] >= 40 && inside(chip, screen) && ui.testSheet() == PhoneUi.Sheet.FILTER);
+				AutoTest.shot(mc, "trsclient-reels-23b-hochkant-filter");
+				next(15);
+				return;
+			}
+			case 131:
+				AutoTest.key(mc, Keys.code("key.keyboard.r"));
+				if (ui.testHold() != PhoneHold.LANDSCAPE) ui.inputKey(Keys.code("key.keyboard.r"), UiKey.NONE, false);
+				next(30);
+				return;
+			case 132:
+				clickSpot(mc, "filterMine");
+				next(5);
+				return;
+			case 133: {
+				String self = mc.getUser().getName();
+				int own = 0;
+				for (ReelsPost p : reels.backend().feed()) if (self.equalsIgnoreCase(p.author)) own++;
+				List<String> shown = ui.testShown();
+				boolean onlyOwn = !shown.isEmpty();
+				for (String id : shown) {
+					ReelsPost p = byId(reels, id);
+					onlyOwn &= p != null && self.equalsIgnoreCase(p.author);
+				}
+				check("„Ich“: nur die " + own + " eigenen Posts (gezeigt: " + shown.size() + " von " + reels.backend().feed().size()
+						+ "), keiner von Steve_Baut", onlyOwn && shown.size() == own && own < reels.backend().feed().size()
+						&& ui.testFilter() == FeedFilter.MINE);
+				check("der Filter steht in den Einstellungen (" + modules.reels.feedFilter.get() + ")",
+						modules.reels.feedFilter.get() == FeedFilter.MINE);
+				clickSpot(mc, "filterFriends");
+				next(5);
+				return;
+			}
+			case 134:
+				check("„Freunde“: kein Post (ohne Server ist kein Freund bekannt), die Marke bleibt da",
+						ui.testFilter() == FeedFilter.FRIENDS && ui.testShown().isEmpty() && ui.testSpot("filterChip") != null);
+				esc(mc);
+				next(10);
+				return;
+			case 135:
+				AutoTest.shot(mc, "trsclient-reels-24-freunde-leer");
+				next(15);
+				return;
+			case 136:
+				clickSpot(mc, "filterChip");
+				check("auch ohne Post im Bild öffnet die Marke das Blatt", ui.testSheet() == PhoneUi.Sheet.FILTER);
+				next(10);
+				return;
+			case 137:
+				clickSpot(mc, "filterAll");
+				next(5);
+				return;
+			case 138:
+				check("„Alle“: wieder alle " + reels.backend().feed().size() + " Posts", ui.testFilter() == FeedFilter.ALL
+						&& ui.testShown().size() == reels.backend().feed().size());
+				clickSpot(mc, "sortPopular");
+				next(5);
+				return;
+			case 139: {
+				List<String> shown = ui.testShown();
+				check("„Beliebt“: der Post, den der Test geliked hat, steht vorn", ui.testSort() == FeedSort.POPULAR && !shown.isEmpty()
+						&& shown.get(0).equals(likedPost));
+				check("die Reihenfolge steht in den Einstellungen (" + modules.reels.feedSort.get() + ")",
+						modules.reels.feedSort.get() == FeedSort.POPULAR);
+				esc(mc);
+				next(5);
+				return;
+			}
+			case 140:
+				// Handy weg und wieder heraus: die Reihenfolge ist gemerkt.
+				Mc.setScreen(null);
+				next(5);
+				return;
+			case 141: {
+				boolean opened = ReelsHooks.open();
+				ui = ReelsHooks.phone();
+				if (ui == null) {
+					check("Handy geht wieder auf", false);
+					finish(mc);
+					return;
+				}
+				check("nach dem Wegstecken und Herausholen gilt weiter „Beliebt“", opened && ui.testSort() == FeedSort.POPULAR
+						&& ui.testFilter() == FeedFilter.ALL);
+				next(30);
+				return;
+			}
+			case 142: {
+				AutoTest.key(mc, Keys.code("key.keyboard.tab"));
+				boolean tab = ui.testSheet() == PhoneUi.Sheet.FILTER;
+				esc(mc);
+				check("Tab öffnet das Blatt „Feed“, Esc schließt es, das Handy bleibt offen", tab && ui.testSheet() == PhoneUi.Sheet.NONE
+						&& Mc.screen() instanceof dev.theredstonee.trsclient.screen.ReelsScreen && !ui.isClosing());
+				clickSpot(mc, "filterChip");
+				next(10);
+				return;
+			}
+			case 143:
+				clickSpot(mc, "sortNewest");
+				next(5);
+				return;
+			case 144:
+				check("zurück auf „Alle“ und „Neu“", ui.testFilter() == FeedFilter.ALL && ui.testSort() == FeedSort.NEWEST
+						&& modules.reels.feedFilter.get() == FeedFilter.ALL && modules.reels.feedSort.get() == FeedSort.NEWEST);
+				esc(mc);
+				next(10);
+				return;
+			case 145:
+				// --- D. Kommentare: bearbeiten, antworten, @Namen, Erwähnung ---
+				check("der Post mit dem Kommentar des Tests ist im Bild", goTo(mc, likedPost));
+				next(10);
+				return;
+			case 146:
+				AutoTest.key(mc, Keys.code("key.keyboard.enter"));
+				next(10);
+				return;
+			case 147: {
+				int[] sheet = spot("commentSheet");
+				int[] reply = ui.testSpot("commentReply0"), edit = ui.testSpot("commentEdit0");
+				check("unter dem eigenen Kommentar stehen „Antworten“ " + Arrays.toString(reply) + " und „Bearbeiten“ "
+						+ Arrays.toString(edit) + ", beide Klickflächen mindestens 40 hoch und im Blatt", ui.testView() == PhoneUi.View.COMMENTS
+						&& reply != null && edit != null && reply[3] >= 40 && edit[3] >= 40 && inside(reply, sheet) && inside(edit, sheet));
+				ReelsPost post = byId(reels, likedPost);
+				editedComment = post == null || post.comments.isEmpty() ? null : post.comments.get(0).id;
+				clickSpot(mc, "commentEdit0");
+				next(10);
+				return;
+			}
+			case 148: {
+				check("echter Klick auf „Bearbeiten“: der alte Text steht im Feld, Leiste und Markierung sind da",
+						"EDIT".equals(ui.testCommentMode()) && COMMENT.equals(ui.testCommentText()) && ui.testSpot("commentBanner") != null
+								&& ui.testSpot("commentTarget") != null);
+				// Die Schreibmarke ist beweglich: Pos1 (echte Taste), dann tippen.
+				AutoTest.key(mc, Keys.code("key.keyboard.home"));
+				ui.inputChar('X');
+				check("Pos1 und „X“: der Text beginnt mit „X“, die Schreibmarke steht dahinter (" + ui.testCommentText() + ")",
+						("X" + COMMENT).equals(ui.testCommentText()) && ui.testCommentCaret() == 1);
+				next(10);
+				return;
+			}
+			case 149:
+				AutoTest.shot(mc, "trsclient-reels-25c-quer-bearbeiten");
+				next(15);
+				return;
+			case 150: {
+				AutoTest.key(mc, Keys.code("key.keyboard.enter"));
+				ReelsPost post = byId(reels, likedPost);
+				ReelsComment c = post == null || post.comments.isEmpty() ? null : post.comments.get(0);
+				check("Enter ändert den Kommentar: dieselbe ID, neuer Text, „bearbeitet“ gemerkt, wieder „neuer Kommentar“",
+						c != null && post.comments.size() == 1 && editedComment != null && editedComment.equals(c.id)
+								&& ("X" + COMMENT).equals(c.text) && c.editedAt != null && "NEW".equals(ui.testCommentMode()));
+				next(10);
+				return;
+			}
+			case 151: {
+				esc(mc);
+				// Jemand anderes erwähnt den Spieler – ohne Server kommt so etwas nur über den Speicher an.
+				ReelsComment ping = ui.testView() != PhoneUi.View.FEED ? null : reels.backend().comment(likedPost, "Steve_Baut",
+						"Stark! @" + mc.getUser().getName() + " wo ist das?", System.currentTimeMillis());
+				pingComment = ping == null ? null : ping.id;
+				reels.saveLater();
+				next(10);
+				return;
+			}
+			case 152:
+				check("eine Erwähnung von Steve_Baut: Meldung „" + ui.testToast() + "“, Marke am Kommentar-Symbol "
+						+ Arrays.toString(ui.testSpot("pingBadge")) + ", 1 ungesehen", pingComment != null
+						&& I18n.tr("reels.toast.ping", "Steve_Baut").equals(ui.testToast()) && ui.testSpot("pingBadge") != null
+						&& ui.testUnseenPings() == 1);
+				AutoTest.shot(mc, "trsclient-reels-25d-quer-ping");
+				next(15);
+				return;
+			case 153:
+				Mc.setScreen(null);
+				next(5);
+				return;
+			case 154: {
+				ReelsHooks.open();
+				ui = ReelsHooks.phone();
+				if (ui == null) {
+					check("Handy geht wieder auf", false);
+					finish(mc);
+					return;
+				}
+				next(30);
+				return;
+			}
+			case 155:
+				check("nach dem Wegstecken und Herausholen kommt die Meldung nicht noch einmal", ui.testToast() == null
+						&& ui.testUnseenPings() == 1);
+				goTo(mc, likedPost);
+				next(10);
+				return;
+			case 156:
+				check("die Marke am Kommentar-Symbol ist noch da", ui.testSpot("pingBadge") != null);
+				AutoTest.key(mc, Keys.code("key.keyboard.enter"));
+				next(10);
+				return;
+			case 157: {
+				ReelsComment ping = comment(byId(reels, likedPost), pingComment);
+				check("Kommentare geöffnet: die Marke ist weg, die Erwähnung gilt als gesehen", ui.testView() == PhoneUi.View.COMMENTS
+						&& ui.testSpot("pingBadge") == null && ping != null && Boolean.TRUE.equals(ping.seen) && ui.testUnseenPings() == 0);
+				check("der fremde Kommentar hat „Antworten“, aber kein „Bearbeiten“", ui.testSpot("commentReply1") != null
+						&& ui.testSpot("commentEdit1") == null);
+				clickSpot(mc, "commentReply1");
+				next(10);
+				return;
+			}
+			case 158:
+				check("echter Klick auf „Antworten“: die Leiste „Antwort an …“ ist da", "REPLY".equals(ui.testCommentMode())
+						&& ui.testSpot("commentBanner") != null && ui.testSpot("commentTarget") != null);
+				AutoTest.shot(mc, "trsclient-reels-25-quer-kommentare-antwort");
+				next(15);
+				return;
+			case 159:
+				for (char ch : "@St".toCharArray()) ui.inputChar(ch);
+				next(10);
+				return;
+			case 160:
+				check("„@St“ schlägt Steve_Baut vor " + ui.testSuggestions() + " und zeigt den Hinweis, dass niemand benachrichtigt wird",
+						ui.testSuggestions().contains("Steve_Baut") && ui.testSpot("suggest0") != null && ui.testSpot("commentNote") != null);
+				AutoTest.shot(mc, "trsclient-reels-25b-quer-namen");
+				next(15);
+				return;
+			case 161: {
+				AutoTest.key(mc, Keys.code("key.keyboard.tab"));
+				check("Tab setzt den Namen ein („" + ui.testCommentText() + "“)", "@Steve_Baut ".equals(ui.testCommentText()));
+				for (int i = 0; i < REPLY.length(); i++) ui.inputChar(REPLY.charAt(i));
+				AutoTest.key(mc, Keys.code("key.keyboard.enter"));
+				ReelsPost post = byId(reels, likedPost);
+				ReelsComment last = null;
+				if (post != null) for (ReelsComment c : post.comments) if (("@Steve_Baut " + REPLY).equals(c.text)) last = c;
+				check("Enter sendet die Antwort: sie hängt am Kommentar von Steve_Baut", last != null && pingComment != null
+						&& pingComment.equals(last.replyTo) && mc.getUser().getName().equals(last.author) && "NEW".equals(ui.testCommentMode()));
+				next(10);
+				return;
+			}
+			case 162: {
+				int[] parent = ui.testSpot("commentRow1"), reply = ui.testSpot("commentRow2");
+				check("die Antwort " + Arrays.toString(reply) + " steht eingerückt unter dem Kommentar " + Arrays.toString(parent),
+						parent != null && reply != null && reply[0] > parent[0] && reply[1] >= parent[1] + parent[3]);
+				// Hochkant ansehen: im Kommentar-Blatt ist R ein Buchstabe – also schließen, drehen, wieder öffnen.
+				esc(mc);
+				AutoTest.key(mc, Keys.code("key.keyboard.r"));
+				if (ui.testHold() != PhoneHold.PORTRAIT) ui.inputKey(Keys.code("key.keyboard.r"), UiKey.NONE, false);
+				AutoTest.key(mc, Keys.code("key.keyboard.enter"));
+				next(30);
+				return;
+			}
+			case 163:
+				AutoTest.shot(mc, "trsclient-reels-26-hochkant-kommentare");
+				next(15);
+				return;
+			case 164: {
+				// Viele Kommentare: das Mausrad blättert in der Liste, nicht im Feed.
+				long now = System.currentTimeMillis();
+				for (int i = 0; i < 8; i++) {
+					reels.backend().comment(likedPost, i % 2 == 0 ? "Alex_Farm" : "Steve_Baut", "Kommentar Nummer " + (i + 1), now + i);
+				}
+				reels.saveLater();
+				next(10);
+				return;
+			}
+			case 165: {
+				commentScroll = ui.testCommentScroll();
+				pageBefore = ui.testPage();
+				int[] sheet = spot("commentSheet");
+				double gs = Mc.window().getGuiScale();
+				Mc.screen().mouseScrolled((sheet[0] + sheet[2] / 2.0) / gs, (sheet[1] + sheet[3] / 2.0) / gs, 0, 1);
+				next(5);
+				return;
+			}
+			case 166: {
+				ReelsPost post = byId(reels, likedPost);
+				check("11 Kommentare: das Mausrad nach oben blättert in den Kommentaren (" + commentScroll + " → "
+						+ ui.testCommentScroll() + "), die Seite des Feeds bleibt", post != null && post.comments.size() == 11
+						&& ui.testCommentScroll() != commentScroll && ui.testPage() == pageBefore && ui.testView() == PhoneUi.View.COMMENTS);
+				// Irgendein „Antworten“, das gerade zu sehen ist.
+				String link = null;
+				for (int i = 10; i >= 0 && link == null; i--) if (ui.testSpot("commentReply" + i) != null) link = "commentReply" + i;
+				if (link == null) throw new IllegalStateException("kein „Antworten“ zu sehen");
+				clickSpot(mc, link);
+				next(10);
+				return;
+			}
+			case 167: {
+				boolean replying = "REPLY".equals(ui.testCommentMode());
+				esc(mc);
+				check("Esc beim Antworten beendet nur das Antworten, das Blatt bleibt offen", replying && "NEW".equals(ui.testCommentMode())
+						&& ui.testView() == PhoneUi.View.COMMENTS);
+				esc(mc);
+				check("das nächste Esc schließt die Kommentare, das Handy bleibt offen", ui.testView() == PhoneUi.View.FEED
+						&& ReelsHooks.phoneOpen() && !ui.isClosing());
+				next(10);
+				return;
+			}
+			case 168: {
+				String json = feedJson(reels);
+				check("feed.json enthält „replyTo“, „editedAt“ und „seen“", json.contains("\"replyTo\"") && json.contains("\"editedAt\"")
+						&& json.contains("\"seen\""));
+				check("die Spielerliste für die Namensvorschläge kennt den eigenen Namen " + ReelsHooks.onlinePlayers(),
+						ReelsHooks.onlinePlayers().contains(mc.getUser().getName()));
+				next(5);
+				return;
+			}
+			case 169: {
+				// --- E. Streak-Schutz (zuletzt: bis hierher ist die Streak 1) ---
+				int[] flame = spot("streak"), heart = spot("heart");
+				check("hochkant: die Klickfläche der Flamme " + Arrays.toString(flame) + " ist mindestens 40×40 und liegt nicht über dem"
+						+ " Herz " + Arrays.toString(heart), ui.testHold() == PhoneHold.PORTRAIT && flame[2] >= 40 && flame[3] >= 40
+						&& !overlap(flame, heart));
+				// Vorgestern und vorvorgestern wurde gepostet, gestern nicht: die Streak bleibt 1, ließe sich aber retten.
+				String self = mc.getUser().getName();
+				long now = System.currentTimeMillis();
+				addPost(reels, self, now - 2 * 86400000L, 1, "Vorgestern am See", null);
+				addPost(reels, self, now - 3 * 86400000L, 0, "Der erste Abend", null);
+				reels.saveLater();
+				check("zwei Posts von vorgestern und dem Tag davor: die Streak bleibt 1, weil gestern fehlt ("
+						+ reels.backend().streak(now) + ")", reels.backend().streak(now) == 1);
+				next(10);
+				return;
+			}
+			case 170:
+				Mc.setScreen(null);
+				next(5);
+				return;
+			case 171: {
+				ReelsHooks.open();
+				ui = ReelsHooks.phone();
+				if (ui == null) {
+					check("Handy geht wieder auf", false);
+					finish(mc);
+					return;
+				}
+				next(20);
+				return;
+			}
+			case 172:
+				check("beim Herausholen kommt der Hinweis „" + ui.testToast() + "“",
+						I18n.tr("reels.toast.streak.rescuable").equals(ui.testToast()));
+				Mc.setScreen(null);
+				next(5);
+				return;
+			case 173: {
+				ReelsHooks.open();
+				ui = ReelsHooks.phone();
+				if (ui == null) {
+					check("Handy geht wieder auf", false);
+					finish(mc);
+					return;
+				}
+				next(30);
+				return;
+			}
+			case 174:
+				check("beim nächsten Herausholen am selben Tag kommt der Hinweis nicht noch einmal", ui.testToast() == null);
+				clickSpot(mc, "streak");
+				check("echter Klick auf die Flamme öffnet das Blatt „Streak“", ui.testSheet() == PhoneUi.Sheet.STREAK);
+				next(10);
+				return;
+			case 175:
+				AutoTest.shot(mc, "trsclient-reels-27b-hochkant-streak");
+				next(15);
+				return;
+			case 176:
+				AutoTest.key(mc, Keys.code("key.keyboard.r"));
+				if (ui.testHold() != PhoneHold.LANDSCAPE) ui.inputKey(Keys.code("key.keyboard.r"), UiKey.NONE, false);
+				next(30);
+				return;
+			case 177: {
+				int[] flame = spot("streak"), heart = spot("heart");
+				check("quer: die Klickfläche der Flamme " + Arrays.toString(flame) + " ist mindestens 40×40 und liegt nicht über dem Herz "
+						+ Arrays.toString(heart), ui.testHold() == PhoneHold.LANDSCAPE && flame[2] >= 40 && flame[3] >= 40
+						&& !overlap(flame, heart));
+				StreakGuard g = ui.testStreakGuard();
+				check("„Gestern retten“ ist da: retten ginge (Streak dann " + g.streakIfRescued + "), heute pausieren nicht (heute ist"
+						+ " schon gepostet)", ui.testSpot("streakRescue") != null && g.canRescueYesterday && g.streakIfRescued == 3
+						&& !g.canPauseToday && g.leftForYesterday == StreakGuard.PER_MONTH);
+				AutoTest.shot(mc, "trsclient-reels-27-quer-streak");
+				next(15);
+				return;
+			}
+			case 178: {
+				long now = System.currentTimeMillis();
+				clickSpot(mc, "streakRescue");
+				check("der erste Klick auf „Gestern retten“ fragt nur nach: Streak weiter 1, kein Schutz eingelöst",
+						reels.backend().streak(now) == 1 && ui.testStreakGuard().leftForYesterday == StreakGuard.PER_MONTH
+								&& ui.testSheet() == PhoneUi.Sheet.STREAK);
+				clickSpot(mc, "streakRescue");
+				check("ein zweiter Klick im selben Augenblick (Doppelklick) löst auch nichts ein", reels.backend().streak(now) == 1
+						&& ui.testStreakGuard().leftForYesterday == StreakGuard.PER_MONTH && ui.testSheet() == PhoneUi.Sheet.STREAK);
+				armedAt = System.nanoTime();
+				next(10);
+				return;
+			}
+			case 179: {
+				// Die Sperre gegen Doppelklicks misst echte Zeit (0,4 s), die Nachfrage gilt 3 s.
+				if (System.nanoTime() - armedAt < 600_000_000L) return;
+				long now = System.currentTimeMillis();
+				clickSpot(mc, "streakRescue");
+				check("der Klick danach rettet: Streak " + reels.backend().streak(now) + ", Meldung „" + ui.testToast() + "“, Blatt zu",
+						reels.backend().streak(now) == 3 && I18n.tr("reels.toast.streak.rescued", 3).equals(ui.testToast())
+								&& ui.testSheet() == PhoneUi.Sheet.NONE);
+				check("für gestern ist noch 1 Schutz übrig", ui.testStreakGuard().leftForYesterday == StreakGuard.PER_MONTH - 1);
+				next(10);
+				return;
+			}
+			case 180:
+				// Zum Ansehen: die Flamme zeigt 3, die Meldung steht noch.
+				AutoTest.shot(mc, "trsclient-reels-27c-quer-streak-gerettet");
+				next(15);
+				return;
+			case 181: {
+				long now = System.currentTimeMillis();
+				long today = reels.epochDay(now);
+				String json = feedJson(reels);
+				com.google.gson.JsonObject root = com.google.gson.JsonParser.parseString(json).getAsJsonObject();
+				com.google.gson.JsonArray freezes = root.has("freezes") ? root.getAsJsonArray("freezes") : new com.google.gson.JsonArray();
+				String frozen = freezes.size() == 1 ? freezes.get(0).getAsJsonObject().get("day").getAsString() : null;
+				String clock = root.has("clockDay") ? root.get("clockDay").getAsString() : null;
+				check("feed.json: geschützt ist gestern (" + frozen + "), gemerkter Tag ist heute (" + clock + ")",
+						ReelsTime.civil(today - 1).equals(frozen) && ReelsTime.civil(today).equals(clock));
+				int reloaded = new LocalReelsBackend(dir(reels), TimeZone.getDefault()).streak(now);
+				check("neu von der Platte geladen ist die Streak ebenfalls 3 (" + reloaded + ")", reloaded == 3);
+				clickSpot(mc, "streak");
+				next(10);
+				return;
+			}
+			case 182: {
+				StreakGuard g = ui.testStreakGuard();
+				int left = g.leftThisMonth;
+				boolean pauseThere = ui.testSpot("streakPause") != null;
+				if (pauseThere) clickSpot(mc, "streakPause");
+				check("Blatt wieder offen: „Gestern retten“ ist weg, „Heute pausieren“ ist ohne Wirkung",
+						ui.testSheet() == PhoneUi.Sheet.STREAK && ui.testSpot("streakRescue") == null && pauseThere && !g.canPauseToday
+								&& !g.canRescueYesterday && ui.testStreakGuard().leftThisMonth == left && reels.backend().streak(
+								System.currentTimeMillis()) == 3);
+				// Die Meldung „Gerettet!“ soll auf dem Bild nicht mehr stehen.
+				next(80);
+				return;
+			}
+			case 183:
+				AutoTest.shot(mc, "trsclient-reels-27d-quer-streak-danach");
+				next(15);
+				return;
+			case 184:
+				esc(mc);
+				next(10);
+				return;
+			case 185:
+				clickSpot(mc, "camera");
+				next(15);
+				return;
+			case 186: {
+				boolean camera = ui.testView() == PhoneUi.View.CAMERA;
+				clickSpot(mc, "streak");
+				check("in der Kamera ist die Flamme keine Klickfläche (kein Blatt)", camera && ui.testSheet() == PhoneUi.Sheet.NONE
+						&& ui.testView() == PhoneUi.View.CAMERA);
+				esc(mc);
+				next(10);
+				return;
+			}
+			case 187: {
+				PhoneUi open = ui;
+				Mc.setScreen(null);
+				check("Handy ist wieder weg und aufgeräumt", !ReelsHooks.phoneOpen() && open.disposed());
+				// Die eine Kopie, die „Bild speichern“ in den Screenshots-Ordner gelegt hat, bleibt nicht liegen.
+				boolean deleted = exported != null && Files.deleteIfExists(exported);
+				check("die gespeicherte Kopie lag bis zuletzt im Screenshots-Ordner und ist jetzt gelöscht", deleted
+						&& !Files.exists(exported));
+				next(10);
+				return;
+			}
 			default:
 				finish(mc);
 		}
@@ -1014,6 +1766,14 @@ public final class ReelsTest {
 		stopped = true;
 		try {
 			ReelsHooks.testBlur(false);
+			ReelsHooks.testMeta(null);
+			// Was „Bild speichern“ in den Screenshots-Ordner gelegt hat (auch nach einem Abbruch mittendrin).
+			try {
+				if (exported != null) Files.deleteIfExists(exported);
+				if (exportedTwice != null) Files.deleteIfExists(exportedTwice);
+			} catch (IOException e) {
+				TrsClient.LOGGER.warn("[Autotest] Reels: gespeicherte Kopie nicht gelöscht", e);
+			}
 			TrsClient.get().pvp().forceFreelook(Float.NaN);
 			dev.theredstonee.trsclient.TrsKeys.freelook.setDown(false);
 			mc.debugEntries.setOverlayVisible(false);
@@ -1115,6 +1875,72 @@ public final class ReelsTest {
 		int[] r = spot(name);
 		double gs = Mc.window().getGuiScale();
 		AutoTest.click(mc, (r[0] + r[2] / 2.0) / gs, (r[1] + r[3] / 2.0) / gs);
+	}
+
+	/^* Esc (echte Taste) – nur, wenn es ein Blatt, die Kommentare oder die Kamera schließt: im Feed steckte es das Handy weg. *^/
+	private void esc(Minecraft mc) {
+		if (ui.testSheet() != PhoneUi.Sheet.NONE || ui.testView() != PhoneUi.View.FEED) {
+			AutoTest.key(mc, Keys.code("key.keyboard.escape"));
+		}
+	}
+
+	/^* Im Feed mit den Pfeiltasten (echte Tasten) zu diesem Post blättern. Rückgabe: er ist jetzt im Bild. *^/
+	private boolean goTo(Minecraft mc, String id) {
+		int want = ui.testShown().indexOf(id);
+		if (want < 0 || ui.testView() != PhoneUi.View.FEED || ui.testSheet() != PhoneUi.Sheet.NONE) return false;
+		int key = Keys.code(want > ui.testPage() ? "key.keyboard.down" : "key.keyboard.up");
+		for (int i = Math.abs(want - ui.testPage()); i > 0; i--) AutoTest.key(mc, key);
+		return ui.testPage() == want;
+	}
+
+	/^* Zeichnet der Post im Bild keine Marke für Shaderpaket, Instanz oder Version? *^/
+	private boolean noMetaChips() {
+		return ui.testSpot("metaShader") == null && ui.testSpot("metaPack") == null && ui.testSpot("metaVersion") == null;
+	}
+
+	private static String metaText(ReelsMeta m) {
+		return m == null ? "keine Angaben" : m.mc + ", " + m.loader + ", " + m.shader + ", " + m.pack;
+	}
+
+	/^* Liegt {@code r} ganz in {@code outer}? Beide {x, y, Breite, Höhe}. *^/
+	private static boolean inside(int[] r, int[] outer) {
+		return r != null && outer != null && r[0] >= outer[0] && r[1] >= outer[1] && r[0] + r[2] <= outer[0] + outer[2]
+				&& r[1] + r[3] <= outer[1] + outer[3];
+	}
+
+	private static boolean overlap(int[] a, int[] b) {
+		return a[0] < b[0] + b[2] && b[0] < a[0] + a[2] && a[1] < b[1] + b[3] && b[1] < a[1] + a[3];
+	}
+
+	private static ReelsComment comment(ReelsPost post, String id) {
+		if (post == null || id == null) return null;
+		for (ReelsComment c : post.comments) if (id.equals(c.id)) return c;
+		return null;
+	}
+
+	/^* Feed jetzt sichern und {@code feed.json} lesen. *^/
+	private static String feedJson(Reels reels) throws IOException {
+		reels.save();
+		Path feed = dir(reels) == null ? null : dir(reels).resolve("feed.json");
+		return feed != null && Files.isRegularFile(feed)
+				? new String(Files.readAllBytes(feed), java.nio.charset.StandardCharsets.UTF_8) : "";
+	}
+
+	/^*
+	 * Ein Post mit gemaltem Testbild (quer) über den Speicher – für Dinge, die im Entwickler-Start nicht von selbst
+	 * entstehen: Angaben am Foto, ein Post von jemand anderem, Posts von früheren Tagen. Rückgabe: die ID.
+	 *^/
+	private static String addPost(Reels reels, String author, long at, int kind, String caption, ReelsMeta meta) throws IOException {
+		ReelsBackend backend = reels.backend();
+		String id = ReelsPost.newId(at, TimeZone.getDefault(), 0x7e60 + kind);
+		Path file = backend.newPhotoFile(id);
+		if (file == null) throw new IOException("kein Foto-Ordner");
+		Files.createDirectories(file.getParent());
+		int w = 1280, h = 720;
+		Files.write(file, PngWriter.write(w, h, picture(w, h, kind)));
+		ReelsPost p = backend.post(id + ".png", w, h, false, false, caption, author, at, meta);
+		if (p == null) throw new IOException("Post nicht angelegt: " + id);
+		return p.id;
 	}
 
 	private static ReelsPost byId(Reels reels, String id) {
@@ -1243,8 +2069,7 @@ public final class ReelsTest {
 		long[] age = {5 * 3600000L, 2 * 3600000L, 3 * 60000L};
 		int[][] size = {{1280, 720}, {608, 1080}, {1280, 720}};
 		String[] author = {"Steve_Baut", self, self};
-		String[] caption = {"Erste Nacht überstanden – das Haus steht!", "Abendrot über dem Hügel, hochkant fotografiert.",
-				"Schaut mal, wo ich gelandet bin!"};
+		String[] caption = SEED_CAPTIONS;
 		for (int i = 0; i < age.length; i++) {
 			long at = Math.max(dayStart + i * 1000L, now - age[i]);
 			String id = ReelsPost.newId(at, TimeZone.getDefault(), 0x7e50 + i);
