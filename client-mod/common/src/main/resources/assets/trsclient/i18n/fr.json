@@ -2808,6 +2808,7 @@
   "reels.streak.rescue": "Sauver hier",
   "reels.streak.confirm": "Sûr ? Touche encore",
   "reels.streak.left": "Protection de série : {0} sur {1} restantes ce mois-ci",
+  "reels.streak.left.yesterday": "Protection de série : {0} pour hier (mois dernier), {1} ce mois-ci",
   "reels.streak.rule": "Un jour en pause ne compte pas, mais garde la série.",
   "reels.streak.clock": "L'horloge du PC a été reculée – pas de protection possible pour l'instant.",
   "reels.streak.readonly": "Impossible dans une deuxième fenêtre du jeu.",

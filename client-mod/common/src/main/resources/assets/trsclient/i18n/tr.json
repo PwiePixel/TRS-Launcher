@@ -2808,6 +2808,7 @@
   "reels.streak.rescue": "Dünü kurtar",
   "reels.streak.confirm": "Emin misin? Tekrar dokun",
   "reels.streak.left": "Seri koruması: bu ay {1} haktan {0} tanesi kaldı",
+  "reels.streak.left.yesterday": "Seri koruması: dün için {0} (geçen ay), bu ay için {1} hak kaldı",
   "reels.streak.rule": "Duraklatılan gün sayılmaz ama seriyi korur.",
   "reels.streak.clock": "Bilgisayar saati geri alınmış – şu an koruma kullanılamaz.",
   "reels.streak.readonly": "İkinci oyun penceresinde yapılamaz.",

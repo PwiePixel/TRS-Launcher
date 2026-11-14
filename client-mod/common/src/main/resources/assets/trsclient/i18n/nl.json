@@ -2808,6 +2808,7 @@
   "reels.streak.rescue": "Gisteren redden",
   "reels.streak.confirm": "Zeker? Tik nog eens",
   "reels.streak.left": "Streakbescherming: nog {0} van {1} deze maand",
+  "reels.streak.left.yesterday": "Streakbescherming: nog {0} voor gisteren (vorige maand), {1} deze maand",
   "reels.streak.rule": "Een gepauzeerde dag telt niet mee, maar houdt de streak vast.",
   "reels.streak.clock": "De pc-klok is teruggezet – nu is geen bescherming mogelijk.",
   "reels.streak.readonly": "Kan niet in een tweede spelvenster.",

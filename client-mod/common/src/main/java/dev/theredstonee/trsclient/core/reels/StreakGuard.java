@@ -38,7 +38,7 @@ public final class StreakGuard {
 	}
 
 	/** Ohne Streak-Schutz: nichts möglich, nichts übrig. */
-	public static final StreakGuard NONE = new StreakGuard(0, 0, false, false, false, 0, 0, false, false, false);
+	public static final StreakGuard NONE = new StreakGuard(0, 0, false, false, false, 0, 0, false, false, false, false);
 
 	/** Die Streak, wie sie gerade gilt. */
 	public final int streak;
@@ -51,6 +51,8 @@ public final class StreakGuard {
 	public final int leftThisMonth;
 	/** Übrige Schutztage im Monat von gestern (am 1. ist das der Vormonat). */
 	public final int leftForYesterday;
+	/** Gestern liegt in einem anderen Monat als heute (heute ist der 1.): „Gestern retten“ zählt im Vormonat. */
+	public final boolean yesterdayLastMonth;
 	/** Gestern fehlt (kein Post, kein Schutz), und ein Schutz für gestern machte die Streak länger. */
 	public final boolean rescueOffered;
 	public final boolean canPauseToday;
@@ -61,7 +63,8 @@ public final class StreakGuard {
 	public final boolean readOnly;
 
 	private StreakGuard(int streak, int streakIfRescued, boolean postedToday, boolean todayFrozen, boolean yesterdayFrozen,
-			int leftThisMonth, int leftForYesterday, boolean rescueOffered, boolean clockBehind, boolean readOnly) {
+			int leftThisMonth, int leftForYesterday, boolean yesterdayLastMonth, boolean rescueOffered, boolean clockBehind,
+			boolean readOnly) {
 		this.streak = streak;
 		this.streakIfRescued = streakIfRescued;
 		this.postedToday = postedToday;
@@ -69,6 +72,7 @@ public final class StreakGuard {
 		this.yesterdayFrozen = yesterdayFrozen;
 		this.leftThisMonth = leftThisMonth;
 		this.leftForYesterday = leftForYesterday;
+		this.yesterdayLastMonth = yesterdayLastMonth;
 		this.rescueOffered = rescueOffered;
 		this.clockBehind = clockBehind;
 		this.readOnly = readOnly;
@@ -104,9 +108,10 @@ public final class StreakGuard {
 		bridged.add(y);
 		int rescued = ReelsTime.streak(posts, bridged, today);
 		boolean offered = !posts.contains(y) && !yesterdayFrozen && rescued > streak;
+		String month = ReelsTime.civil(today).substring(0, 7);
+		String lastMonth = ReelsTime.civil(today - 1).substring(0, 7);
 		return new StreakGuard(streak, rescued, posts.contains(t), frozen.contains(t), yesterdayFrozen,
-				left(freezes, ReelsTime.civil(today).substring(0, 7)), left(freezes, ReelsTime.civil(today - 1).substring(0, 7)),
-				offered, today < newestEventDay, readOnly);
+				left(freezes, month), left(freezes, lastMonth), !month.equals(lastMonth), offered, today < newestEventDay, readOnly);
 	}
 
 	/** Übrige Schutztage in einem Monat ({@code yyyy-MM}): {@link #PER_MONTH} minus die dort eingelösten, nie unter 0. */

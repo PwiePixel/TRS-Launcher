@@ -2808,6 +2808,7 @@
   "reels.streak.rescue": "Uratuj wczoraj",
   "reels.streak.confirm": "Na pewno? Kliknij ponownie",
   "reels.streak.left": "Ochrona serii: zostało {0} z {1} w tym miesiącu",
+  "reels.streak.left.yesterday": "Ochrona serii: {0} na wczoraj (poprzedni miesiąc), {1} w tym miesiącu",
   "reels.streak.rule": "Wstrzymany dzień się nie liczy, ale podtrzymuje serię.",
   "reels.streak.clock": "Zegar komputera został cofnięty – ochrona jest teraz niemożliwa.",
   "reels.streak.readonly": "Niemożliwe w drugim oknie gry.",

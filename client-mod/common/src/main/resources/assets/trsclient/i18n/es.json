@@ -2808,6 +2808,7 @@
   "reels.streak.rescue": "Salvar ayer",
   "reels.streak.confirm": "¿Seguro? Toca otra vez",
   "reels.streak.left": "Protección de racha: quedan {0} de {1} este mes",
+  "reels.streak.left.yesterday": "Protección de racha: quedan {0} para ayer (mes anterior), {1} este mes",
   "reels.streak.rule": "Un día en pausa no cuenta, pero mantiene la racha.",
   "reels.streak.clock": "El reloj del PC se atrasó: ahora no es posible ninguna protección.",
   "reels.streak.readonly": "No es posible en una segunda ventana del juego.",

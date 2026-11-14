@@ -2808,6 +2808,7 @@
   "reels.streak.rescue": "Gestern retten",
   "reels.streak.confirm": "Sicher? Nochmal tippen",
   "reels.streak.left": "Streak-Schutz: noch {0} von {1} in diesem Monat",
+  "reels.streak.left.yesterday": "Streak-Schutz: noch {0} für gestern (Vormonat), {1} in diesem Monat",
   "reels.streak.rule": "Ein pausierter Tag zählt nicht mit, hält aber die Streak.",
   "reels.streak.clock": "Die PC-Uhr wurde zurückgestellt – gerade ist kein Schutz möglich.",
   "reels.streak.readonly": "Geht im zweiten Spielfenster nicht.",

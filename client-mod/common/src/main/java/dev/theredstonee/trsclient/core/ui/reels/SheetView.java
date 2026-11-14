@@ -332,6 +332,8 @@ final class SheetView {
 		String quotaText;
 		if (g.readOnly) quotaText = I18n.tr("reels.streak.readonly");
 		else if (g.clockBehind) quotaText = I18n.tr("reels.streak.clock");
+		// Am 1. zählt „Gestern retten“ im Vormonat: dann stehen beide Zahlen da, sonst passte die Zahl nicht zum Knopf.
+		else if (g.rescueOffered && g.yesterdayLastMonth) quotaText = I18n.tr("reels.streak.left.yesterday", g.leftForYesterday, g.leftThisMonth);
 		else quotaText = I18n.tr("reels.streak.left", g.leftThisMonth, StreakGuard.PER_MONTH);
 		String first = g.streak == 1 ? I18n.tr("reels.compose.streak.same.one", g.streak) : I18n.tr("reels.compose.streak.same", g.streak);
 

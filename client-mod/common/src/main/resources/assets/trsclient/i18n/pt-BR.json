@@ -2808,6 +2808,7 @@
   "reels.streak.rescue": "Salvar ontem",
   "reels.streak.confirm": "Certeza? Toque de novo",
   "reels.streak.left": "Proteção de sequência: restam {0} de {1} neste mês",
+  "reels.streak.left.yesterday": "Proteção de sequência: {0} para ontem (mês passado), {1} neste mês",
   "reels.streak.rule": "Um dia pausado não conta, mas mantém a sequência.",
   "reels.streak.clock": "O relógio do PC foi atrasado – nenhuma proteção é possível agora.",
   "reels.streak.readonly": "Não dá em uma segunda janela do jogo.",

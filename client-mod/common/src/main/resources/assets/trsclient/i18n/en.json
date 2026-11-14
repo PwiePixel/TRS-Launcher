@@ -2808,6 +2808,7 @@
   "reels.streak.rescue": "Rescue yesterday",
   "reels.streak.confirm": "Sure? Tap again",
   "reels.streak.left": "Streak protection: {0} of {1} left this month",
+  "reels.streak.left.yesterday": "Streak protection: {0} left for yesterday (last month), {1} this month",
   "reels.streak.rule": "A paused day does not count, but it keeps the streak.",
   "reels.streak.clock": "The PC clock was set back – no protection possible right now.",
   "reels.streak.readonly": "Not possible in a second game window.",
