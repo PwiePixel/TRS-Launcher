@@ -2,6 +2,10 @@ package dev.theredstonee.trsclient.core.reels;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import dev.theredstonee.trsclient.core.config.ConfigStore;
 
 import java.io.BufferedWriter;
@@ -111,7 +115,9 @@ public final class LocalReelsBackend implements ReelsBackend {
 		if (!Files.isRegularFile(file)) return;
 		FeedFile f = null;
 		try (Reader r = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
-			f = GSON.fromJson(r, FeedFile.class);
+			JsonElement tree = new JsonParser().parse(r);
+			lenient(tree);
+			f = GSON.fromJson(tree, FeedFile.class);
 		} catch (IOException | RuntimeException e) {
 			f = null;
 		}
@@ -132,6 +138,73 @@ public final class LocalReelsBackend implements ReelsBackend {
 		loadFreezes(f.freezes);
 		if (ReelsTime.civilDay(f.clockDay) != Long.MIN_VALUE) clockDay = f.clockDay;
 		refresh();
+	}
+
+	/**
+	 * Die neueren, freiwilligen Felder ({@code freezes}, {@code clockDay}, {@code meta} eines Posts, {@code replyTo},
+	 * {@code editedAt} und {@code seen} eines Kommentars) mit falschem JSON-Typ entfernen, bevor Gson die Datei bindet:
+	 * ein falscher Wert kostet nur diesen Wert, nicht den ganzen Feed.
+	 */
+	static void lenient(JsonElement tree) {
+		if (tree == null || !tree.isJsonObject()) return;
+		JsonObject root = tree.getAsJsonObject();
+		JsonElement freezes = root.get("freezes");
+		if (freezes != null && !freezes.isJsonNull()) {
+			if (!freezes.isJsonArray()) {
+				root.remove("freezes");
+			} else {
+				JsonArray kept = new JsonArray();
+				for (JsonElement e : freezes.getAsJsonArray()) {
+					if (e == null || !e.isJsonObject()) continue;
+					JsonObject o = e.getAsJsonObject();
+					dropUnless(o, "day", true, false, false);
+					dropUnless(o, "usedAt", false, true, false);
+					kept.add(o);
+				}
+				root.add("freezes", kept);
+			}
+		}
+		dropUnless(root, "clockDay", true, false, false);
+		JsonElement posts = root.get("posts");
+		if (posts == null || !posts.isJsonArray()) return;
+		for (JsonElement pe : posts.getAsJsonArray()) {
+			if (pe == null || !pe.isJsonObject()) continue;
+			JsonObject post = pe.getAsJsonObject();
+			JsonElement meta = post.get("meta");
+			if (meta != null && !meta.isJsonNull()) {
+				if (!meta.isJsonObject()) {
+					post.remove("meta");
+				} else {
+					JsonObject m = meta.getAsJsonObject();
+					for (String key : new String[]{"mc", "loader", "shader", "pack"}) dropUnless(m, key, true, false, false);
+				}
+			}
+			JsonElement comments = post.get("comments");
+			if (comments == null || !comments.isJsonArray()) continue;
+			for (JsonElement ce : comments.getAsJsonArray()) {
+				if (ce == null || !ce.isJsonObject()) continue;
+				JsonObject c = ce.getAsJsonObject();
+				dropUnless(c, "replyTo", true, false, false);
+				dropUnless(c, "editedAt", false, true, false);
+				dropUnless(c, "seen", false, false, true);
+			}
+		}
+	}
+
+	/** Entfernt {@code key} aus {@code o}, wenn der Wert weder null noch vom erlaubten Typ ist. */
+	private static void dropUnless(JsonObject o, String key, boolean string, boolean number, boolean bool) {
+		JsonElement e = o.get(key);
+		if (e == null || e.isJsonNull()) return;
+		if (string && isString(e) || number && isNumber(e) || bool && e.isJsonPrimitive() && e.getAsJsonPrimitive().isBoolean()) return;
+		o.remove(key);
+	}
+
+	private static boolean isString(JsonElement e) {
+		return e != null && e.isJsonPrimitive() && e.getAsJsonPrimitive().isString();
+	}
+
+	private static boolean isNumber(JsonElement e) {
+		return e != null && e.isJsonPrimitive() && e.getAsJsonPrimitive().isNumber();
 	}
 
 	/**

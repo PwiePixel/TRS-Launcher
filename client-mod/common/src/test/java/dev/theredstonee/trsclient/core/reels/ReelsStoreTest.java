@@ -140,6 +140,54 @@ class ReelsStoreTest {
 	}
 
 	@Test
+	void aWrongTypedOptionalValueCostsOnlyThatValueNotTheFeed() throws IOException {
+		String post = "{\"id\":\"20261113-120000-0001\",\"photo\":\"20261113-120000-0001.png\",\"createdAt\":%d,\"author\":\"A\",\"meta\":%s,"
+				+ "\"comments\":[{\"id\":\"20261113-120001-0000\",\"author\":\"B\",\"text\":\"hi\",\"at\":9,"
+				+ "\"editedAt\":\"yes\",\"seen\":[1],\"replyTo\":{\"x\":1}},"
+				+ "{\"author\":\"C\",\"text\":\"ok\",\"at\":10,\"editedAt\":12,\"seen\":true}]}";
+		String[][] cases = {
+				{"\"BSL\"", "[]", "\"2026-11-12\""},
+				{"{\"mc\":{},\"loader\":\"fabric\",\"shader\":[\"x\"],\"pack\":\"Pack\"}", "{\"day\":\"2026-11-10\"}", "5"},
+				{"[1,2]", "[5,\"x\",null,{\"day\":7,\"usedAt\":1},{\"day\":\"2026-11-10\",\"usedAt\":\"bald\"}]", "[]"},
+		};
+		for (int i = 0; i < cases.length; i++) {
+			Path dir = tmp.resolve("fall" + i);
+			Files.createDirectories(dir);
+			String json = "{\"version\":1,\"posts\":[" + String.format(post, Long.valueOf(NOON), cases[i][0]) + "],\"freezes\":" + cases[i][1]
+					+ ",\"clockDay\":" + cases[i][2] + "}";
+			Files.write(dir.resolve("feed.json"), json.getBytes(StandardCharsets.UTF_8));
+			LocalReelsBackend b = new LocalReelsBackend(dir, UTC);
+			String tag = "Fall " + i;
+			assertEquals(1, b.feed().size(), tag + ": der Post bleibt");
+			ReelsPost p = b.feed().get(0);
+			assertEquals(2, p.comments.size(), tag);
+			ReelsComment bad = p.comments.get(0);
+			assertEquals("hi", bad.text, tag);
+			assertNull(bad.editedAt, tag);
+			assertNull(bad.seen, tag);
+			assertNull(bad.replyTo, tag);
+			ReelsComment good = p.comments.get(1);
+			assertEquals(Long.valueOf(12), good.editedAt, tag + ": richtige Werte bleiben");
+			assertEquals(Boolean.TRUE, good.seen, tag);
+			if (i == 1) {
+				assertNotNull(p.meta, tag);
+				assertNull(p.meta.mc, tag);
+				assertNull(p.meta.shader, tag);
+				assertEquals("Pack", p.meta.pack, tag);
+			} else {
+				assertNull(p.meta, tag);
+			}
+			// Ein einzelner Schutztag mit falschem Zeitpunkt bleibt als Tag erhalten (Zeitpunkt 0).
+			assertEquals(i == 2 ? 1 : 2, b.streakGuard(NOON).leftThisMonth, tag);
+			assertFalse(b.dirty(), tag + ": Laden allein schreibt nichts");
+			b.post(photo(2), 1280, 720, false, false, "neu", "A", NOON + 1000);
+			b.flush();
+			assertFalse(Files.exists(dir.resolve("feed.json.broken")), tag + ": die Datei galt nicht als kaputt");
+			assertEquals(2, new LocalReelsBackend(dir, UTC).feed().size(), tag + ": der alte Post ist noch da");
+		}
+	}
+
+	@Test
 	void postsWithForeignFileNamesAreDropped() throws IOException {
 		String json = "{\"version\":1,\"posts\":["
 				+ "{\"id\":\"20261113-120000-0001\",\"photo\":\"../../options.txt\",\"createdAt\":5},"
