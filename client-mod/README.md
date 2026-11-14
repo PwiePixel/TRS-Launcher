@@ -73,7 +73,7 @@ All features can be toggled in the TRS menu. Settings are stored in `config/trsc
 | Welt-Details | Sky, stars, distance fog, rain/snow and texture animations (water, lava, fire …) off – each only where the version has a clean hook |
 | Clips & Aufnahme | **F9** saves the last seconds as a clip, **F10** starts/stops a recording (both changeable in the vanilla controls). The TRS Launcher records the game window – the mod only reports the key presses over a local link (see below). HUD element (movable): a subtle ring while the clip buffer runs (*Show buffer indicator*), "Clip saved (30 s)" for a few seconds – with a current TRS Launcher both (and the REC timer) appear in the launcher's overlay instead, so they never end up in a clip. Without the TRS Launcher (or with clips off there) the keys only show a hint |
 | Startbildschirm | TRS title screen: animated redstone circuit on deepslate, glowing pixel wordmark, buttons as redstone lamps (Einzelspieler/Mehrspieler/Einstellungen/TRS-Menü/Mods*/Beenden; keyboard: Tab/arrows + Enter, narrated where the version has a narrator); link "Klassischer Titelbildschirm"; setting *Animierter Hintergrund* switches to a still image; disable the module to always get the vanilla one. Servers are only reached through Mehrspieler |
-| MC-Reels | First test version, **Fabric 26.2 only**, off by default: **K** takes out a phone held by two arms drawn from your own skin (always the same size on screen, independent of the GUI scale; the vanilla hand, the block outline, the crosshair and the TRS HUD rest while it is out, the hotbar stays). On the phone: a photo feed with likes, comments and a streak, a camera ("Foto" / "Selfie") and posting with a caption. Photos never contain HUD, chat, phone or arms. **R** turns the phone (landscape/portrait). No server and no network: feed and photos stay in `config/trsclient/reels` (`feed.json`, `photos/`), which the launcher never puts into an exported modpack. See "MC-Reels" below |
+| MC-Reels | First test version, **Fabric 26.2 only**, off by default: **K** takes out a phone held by two arms drawn from your own skin (always the same size on screen, independent of the GUI scale; the vanilla hand, the block outline, the crosshair and the TRS HUD rest while it is out, the hotbar stays). On the phone: a photo feed with likes, comments (edit, reply, `@` mentions) and a streak with streak protection, a filter (all / friends / me) and an order (new / popular), a camera ("Foto" / "Selfie") and posting with a caption. Photos never contain HUD, chat, phone or arms; a save button copies one into the game's `screenshots` folder or to the clipboard. **R** turns the phone (landscape/portrait). No server and no network: feed and photos stay in `config/trsclient/reels` (`feed.json`, `photos/`), which the launcher never puts into an exported modpack. See "MC-Reels" below |
 
 *Mods only if ModMenu is installed. The TRS menu also has a **Resourcepacks** screen (search, filter all/enabled/available,
 toggle, priority ▲/▼, open folder; applied with one reload).
@@ -480,7 +480,7 @@ and change one key.
 
 MC-Reels (Fabric 26.2): **K** takes out the phone and puts it away again, **R** turns it while it is out. Both are module
 keys too, changed in the TRS menu. K is the default because H already belongs to the Circuit Library ("Hide / show
-template").
+template"). Fixed keys on the phone: Enter opens the comments, Tab opens the feed filter, Esc closes the sheet that is open.
 
 
 ## Languages
@@ -540,6 +540,35 @@ NEW badge 0.27.0). Everything that can be version independent is in `common` (`c
   Captions and comments are plain text: control characters become spaces, half a surrogate pair (an emoji cut in two) is
   dropped, and `feed.json` is written with an encoder that replaces what cannot be written instead of failing. After posting
   the feed shows the new post, also when older posts carry a later time (PC clock set back).
+- **Save button** (right column, under the comment button): a sheet with "Bild speichern", "Bild kopieren" and "Ordner
+  öffnen". Saving copies the photo into the game's `screenshots` folder as `mc-reels_<yyyy-MM-dd_HH.mm.ss>.png` (the time
+  of the post). Nothing is ever overwritten: a taken name gets `_2` to `_99`, and the same picture is not written twice.
+  Copying puts the picture on the system clipboard (`ImageClipboard`; Linux needs `wl-copy` or `xclip`). All three run on
+  the reels worker thread. Sending to other players is not part of it: that would need the TRS server.
+- **Photo info:** every new post stores what it was taken with (`meta`): Minecraft version and loader from the running
+  game, the shader pack and the instance name. The shader pack name is asked from Iris by reflection
+  (`net.irisshaders.iris.Iris#getCurrentPackName()`, an Iris internal: if it is missing or changes, there is simply no
+  name). The instance name is read from the TRS Launcher's `<instance>/instance.json` next to the game folder – only
+  `name`, only when the launcher started the game (`minecraft.launcher.brand`), only when the phone is taken out, and on
+  the worker thread. Other launchers have no instance name; a modpack name of its own does not exist anywhere. Shader pack
+  and instance are shown as small tags under the caption; the version tag appears only beside one of them or when it
+  differs from the running game, so a plain post looks as before.
+- **Filter and order:** the tag "Alle · Neu" in the header (or Tab) opens a sheet with "Alle | Freunde | Ich" and "Neu |
+  Beliebt". Both are module settings (`feedFilter`, `feedSort`), so they are remembered, appear in the TRS menu and travel
+  with the settings sync. "Own" and "friend" are decided by player name. The friends list is only what TRS Online has
+  already loaded for another screen; MC-Reels never requests it. Without a server "Freunde" is therefore usually empty
+  and "Beliebt" only puts the photos you liked yourself first.
+- **Comments:** every comment has an id; own comments can be edited ("(bearbeitet)"), any comment can be answered (one
+  level, indented). The comment field has a moving caret (arrow keys, Home, End, Delete). Typing `@` suggests names from
+  the post, the players on the server, the friends list and the feed (Tab or a click completes; in Streamer mode server
+  and friend names are left out). A mention or an answer by someone else counts as a ping: a number on the comment button
+  and a message, until the comments of that post are opened (`seen`). Without a server a mention notifies nobody, and
+  the sheet says so.
+- **Streak protection:** a tap on the flame opens a sheet with "Heute pausieren" and "Gestern retten" (second tap to
+  confirm). At most 2 protected days per calendar month, counted by the month of the protected day; a protected day
+  bridges the streak but is not counted. The feed remembers the latest calendar day on which the phone was taken out
+  (`clockDay`): while the PC clock is behind that day, no protection can be used. Offline there is no trusted clock, so
+  this only stops the simple trick, not a clock set back before the game starts.
 - **Camera:** the frame is read directly before Minecraft draws its GUI, so a photo can never contain HUD, chat, phone or arms.
   "Selfie" turns the game camera to the player for the viewfinder and the photo; behind the phone the last normal view stays
   (a GPU copy laid back over the world before the GUI is drawn), so the own model never stands between the drawn arms. The
@@ -547,12 +576,20 @@ NEW badge 0.27.0). Everything that can be version independent is in `common` (`c
   are 16:9 or 9:16 crops, at most 1280 px long, never upscaled. A photo that is not posted is deleted again.
 - **Data:** `config/trsclient/reels/feed.json` and `config/trsclient/reels/photos/<id>.png`. No network code. The launcher
   never exports `config/trsclient`. In a second window of the same instance nothing is written, so the camera takes no photo there.
+  `feed.json` stays `version: 1`; the newer fields are all optional, so an old file loads unchanged: per post `meta`
+  (`mc`, `loader`, `shader`, `pack`), per comment `id`, `replyTo`, `editedAt` and `seen`, and at the top level `freezes`
+  (the protected days: `day`, `usedAt`) and `clockDay`. An older build of the mod drops them on its next save. The only
+  files written outside `config/trsclient/reels` are the copies "Bild speichern" puts into `screenshots`; the only file
+  read outside it is the launcher's `instance.json`.
 - **Servers:** the id `mcReels` can be locked with TRS Server Rules.
 
 Self-test: `-PtrsAutotestOnly=reels` (fabric 26.2 only; own feed folder with `-PtrsSys.trsclient.reels.dir=<folder in the game
 dir>`): both holds, GUI scales 1/2/4, several window sizes, feed, like, comment, camera, selfie, posting, closing, key lock
-after another screen, toggle freelook, F3 crosshair, resizing and closing on "Selfie"; screenshots
-`trsclient-26.2-reels-*.png` plus the two posted photos, results in the log under `[Autotest] Reels`.
+after another screen, toggle freelook, F3 crosshair, resizing and closing on "Selfie"; then the save sheet (it writes one
+`mc-reels_*.png` into the dev `screenshots` folder and deletes it again; it never clicks "Bild kopieren" or "Ordner
+öffnen"), photo info, filter and order, comments (edit, reply, `@` names, ping) and streak protection; screenshots
+`trsclient-26.2-reels-*.png` plus the two posted photos, results in the log under `[Autotest] Reels`. The shader pack name
+is only covered by unit tests on fake classes: the self-test runs without Iris.
 
 ## Minigames
 
