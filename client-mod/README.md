@@ -579,8 +579,10 @@ NEW badge 0.27.0). Everything that can be version independent is in `common` (`c
   `feed.json` stays `version: 1`; the newer fields are all optional, so an old file loads unchanged: per post `meta`
   (`mc`, `loader`, `shader`, `pack`), per comment `id`, `replyTo`, `editedAt` and `seen`, and at the top level `freezes`
   (the protected days: `day`, `usedAt`) and `clockDay`. An older build of the mod drops them on its next save. The only
-  files written outside `config/trsclient/reels` are the copies "Bild speichern" puts into `screenshots`; the only file
-  read outside it is the launcher's `instance.json`.
+  files written outside `config/trsclient/reels` are the copies "Bild speichern" puts into `screenshots`; the only files
+  read outside it are the launcher's `instance.json` and, when saving, earlier `mc-reels_*.png` copies in `screenshots`
+  (compared byte for byte so the same picture is not written twice). A wrong-typed value in one of the newer fields is
+  dropped on load; it never makes the whole file unreadable.
 - **Servers:** the id `mcReels` can be locked with TRS Server Rules.
 
 Self-test: `-PtrsAutotestOnly=reels` (fabric 26.2 only; own feed folder with `-PtrsSys.trsclient.reels.dir=<folder in the game
