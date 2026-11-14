@@ -238,10 +238,13 @@ public final class PhoneUi extends UiScreen {
 	private static final class Note {
 		final String text;
 		final Runnable action;
+		/** Die Meldung zu Erwähnungen und Antworten – davon steht oder wartet immer höchstens eine. */
+		final boolean ping;
 
-		Note(String text, Runnable action) {
+		Note(String text, Runnable action, boolean ping) {
 			this.text = text;
 			this.action = action;
+			this.ping = ping;
 		}
 	}
 
@@ -343,8 +346,6 @@ public final class PhoneUi extends UiScreen {
 	private int unseenPings;
 	private List<ReelsPost> pingFeed;
 	private boolean pingsKnown;
-	/** Text der Meldung zu Erwähnungen und Antworten, solange sie stehen oder warten kann (sonst null). */
-	private String pingNote;
 	/** Zahl der ungesehenen unter dem Post im Bild – gerechnet für diesen Feed und diesen Post. */
 	private int badgeCount;
 	private List<ReelsPost> badgeFeed;
@@ -390,6 +391,8 @@ public final class PhoneUi extends UiScreen {
 	private long toastUntil;
 	/** Klick auf die laufende Meldung (null: sie ist nur Text). */
 	private Runnable toastAction;
+	/** Die laufende Meldung ist die zu Erwähnungen und Antworten. */
+	private boolean toastPing;
 	private final ArrayDeque<Note> toastQueue = new ArrayDeque<Note>();
 	/** Unterkante von Seitenzahl und Filter-Marke im letzten Bild des Feeds (Fensterpixel; 0 = keine). */
 	int headBottom;
@@ -403,6 +406,11 @@ public final class PhoneUi extends UiScreen {
 	private int streakArmed;
 	private long streakArmedAt;
 	private boolean streakEnterUp;
+	/**
+	 * Die Taste (Enter, Tab oder Esc), die zuletzt ein Blatt oder einen Modus geöffnet oder geschlossen hat: solange sie
+	 * unten bleibt, gehen ihre Wiederholungen nicht in die nächste Ebene (null = keine).
+	 */
+	private UiKey heldKey;
 	private StreakGuard guard;
 	private long guardSecond = Long.MIN_VALUE;
 	private List<ReelsPost> guardFeed;
@@ -489,6 +497,7 @@ public final class PhoneUi extends UiScreen {
 		if (photos != null) photos.frame();
 		cameraTick(l, raw.images());
 		trackEnter();
+		if (heldKey != null && !down(heldKey)) heldKey = null;
 
 		// Ab hier ist eine Einheit ein Fensterpixel – die GUI-Skalierung spielt keine Rolle mehr.
 		raw.push();
@@ -517,6 +526,20 @@ public final class PhoneUi extends UiScreen {
 			}
 		} finally {
 			raw.pop();
+		}
+	}
+
+	/** Ist die Taste gerade unten? (Für Enter zählt auch das Enter des Ziffernblocks.) */
+	private boolean down(UiKey key) {
+		switch (key) {
+			case ENTER:
+				return host.keyDown("key.keyboard.enter") || host.keyDown("key.keyboard.keypad.enter");
+			case TAB:
+				return host.keyDown("key.keyboard.tab");
+			case ESCAPE:
+				return host.keyDown("key.keyboard.escape");
+			default:
+				return false;
 		}
 	}
 
@@ -1069,7 +1092,8 @@ public final class PhoneUi extends UiScreen {
 				sendComment();
 				return;
 			case ESCAPE:
-				// Erst den Modus verlassen, dann das Blatt schließen.
+				// Erst den Modus verlassen, dann das Blatt schließen – je Druck eine Ebene, nie per Tastenwiederholung mehr.
+				heldKey = key;
 				if (commentMode != CommentMode.NEW) cancelCommentMode();
 				else closeComments();
 				return;
@@ -1134,21 +1158,37 @@ public final class PhoneUi extends UiScreen {
 				openPing();
 			}
 		};
-		pingNote = text;
-		announce(text, open);
+		// Steht oder wartet schon eine, wird sie ersetzt – nie zwei mit verschiedenen Zahlen.
+		if (toastPing && toast != null && ticker() < toastUntil) {
+			show(text, open, true);
+			return;
+		}
+		boolean replaced = false;
+		ArrayDeque<Note> queue = new ArrayDeque<Note>();
+		for (Note n : toastQueue) {
+			if (!n.ping) queue.add(n);
+			else if (!replaced) {
+				queue.add(new Note(text, open, true));
+				replaced = true;
+			}
+		}
+		if (replaced) {
+			toastQueue.clear();
+			toastQueue.addAll(queue);
+			return;
+		}
+		announce(text, open, true);
 	}
 
 	/** Die Meldung zu Erwähnungen und Antworten wegnehmen, falls sie noch steht oder wartet. */
 	private void dropPingNote() {
-		String text = pingNote;
-		pingNote = null;
-		if (text == null) return;
-		if (text.equals(toast)) {
+		if (toastPing) {
 			toast = null;
 			toastAction = null;
+			toastPing = false;
 		}
 		for (Iterator<Note> it = toastQueue.iterator(); it.hasNext(); ) {
-			if (text.equals(it.next().text)) it.remove();
+			if (it.next().ping) it.remove();
 		}
 	}
 
@@ -1515,12 +1555,13 @@ public final class PhoneUi extends UiScreen {
 	 * was gerade dasteht.
 	 */
 	void toast(String text) {
-		show(text, null);
+		show(text, null, false);
 	}
 
-	private void show(String text, Runnable action) {
+	private void show(String text, Runnable action, boolean ping) {
 		toast = text;
 		toastAction = action;
+		toastPing = ping;
 		toastUntil = ticker() + TOAST_MS;
 	}
 
@@ -1529,20 +1570,25 @@ public final class PhoneUi extends UiScreen {
 	 * ist – höchstens {@link #TOAST_QUEUE} warten. {@code action}: Klick auf die Meldung (null: nur Text).
 	 */
 	void announce(String text, Runnable action) {
+		announce(text, action, false);
+	}
+
+	private void announce(String text, Runnable action, boolean ping) {
 		if (text == null || text.isEmpty() || disposed) return;
-		if (toast == null || ticker() >= toastUntil) show(text, action);
-		else if (toastQueue.size() < TOAST_QUEUE) toastQueue.add(new Note(text, action));
+		if (toast == null || ticker() >= toastUntil) show(text, action, ping);
+		else if (toastQueue.size() < TOAST_QUEUE) toastQueue.add(new Note(text, action, ping));
 	}
 
 	private void drawToast(Canvas c, PhoneLayout l) {
 		if (toast != null && ticker() >= toastUntil) {
 			toast = null;
 			toastAction = null;
+			toastPing = false;
 		}
 		if (toast == null) {
 			Note next = toastQueue.poll();
 			if (next == null) return;
-			show(next.text, next.action);
+			show(next.text, next.action, next.ping);
 		}
 		int m = PhoneText.scale(24, l.q);
 		int pad = Math.max(2, Math.round(12 * l.q));
@@ -1902,6 +1948,11 @@ public final class PhoneUi extends UiScreen {
 	@Override
 	public boolean keyPressed(int rawKey, UiKey key, boolean shift) {
 		if (isClosing()) return true;
+		if (key != null && key == heldKey) {
+			// Tastenwiederholung der Taste, die eben die Ebene gewechselt hat: verbraucht, sonst nichts.
+			if (down(key)) return true;
+			heldKey = null;
+		}
 		if (view == View.COMMENTS) {
 			commentKey(key);
 			return true;
@@ -1931,13 +1982,18 @@ public final class PhoneUi extends UiScreen {
 			return true;
 		}
 		if (view == View.CAMERA) return cameraKey(name, key);
-		if (view == View.FEED && sheet != Sheet.NONE) return sheetKey(key);
+		if (view == View.FEED && sheet != Sheet.NONE) {
+			if (key == UiKey.ENTER || key == UiKey.TAB || key == UiKey.ESCAPE) heldKey = key;
+			return sheetKey(key);
+		}
 		switch (key) {
 			case ENTER:
+				heldKey = key;
 				openComments();
 				return true;
 			case TAB:
 				// „Feed“ (Filter und Reihenfolge) – ohne einen einzigen Post gibt es nichts zu filtern.
+				heldKey = key;
 				openSheet(Sheet.FILTER);
 				return true;
 			case DOWN:
@@ -2106,6 +2162,7 @@ public final class PhoneUi extends UiScreen {
 		results.clear();
 		toastQueue.clear();
 		toastAction = null;
+		toastPing = false;
 		closeComments();
 		commentInput.setFocused(false);
 		captionInput.setFocused(false);

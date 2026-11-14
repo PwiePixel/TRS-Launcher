@@ -134,12 +134,15 @@ final class FeedView {
 		int chipW = ui.feedSize() > 0 ? filterChip(posW) : 0;
 		title(Math.max(posW + chipW, land ? statusW : 0));
 		ui.headBottom = headBottom;
+		// Hochkant liegt ein Blatt („Bild“, „Feed“, Streak) quer über Autorzeile und rechter Spalte: die würden mitten
+		// durchgeschnitten. Darunter ist ohnehin nichts klickbar – sie ruhen, solange das Blatt offen ist.
+		boolean covered = !land && post != null && ui.sheet() != PhoneUi.Sheet.NONE;
 		if (post == null) {
 			empty(navH);
-		} else {
+		} else if (!covered) {
 			info(post, navH);
 		}
-		rail(post);
+		if (!covered) rail(post);
 		if (!land) nav(navH);
 		if (post != null && ui.view() == PhoneUi.View.COMMENTS) comments.draw(c, l, post);
 		sheets.draw(c, l);
@@ -778,7 +781,8 @@ final class FeedView {
 		int mBig = PhoneText.scale(36, l.q);
 		int mHint = PhoneText.scale(24, l.q);
 		int mKeys = PhoneText.scale(19, l.q);
-		List<String> hint = PhoneText.wrap(c, hintText, mHint, max, friends ? 4 : 2);
+		// „MC-Reels“ wird nie am Bindestrich getrennt.
+		List<String> hint = friends ? PhoneText.wrapWords(c, hintText, mHint, max, 4) : PhoneText.wrap(c, hintText, mHint, max, 2);
 		List<String> keys = friends ? new ArrayList<String>()
 				: PhoneText.wrap(c, I18n.tr("reels.hint.keys", ui.rotateKeyLabel(), ui.openKeyLabel()), mKeys, max, 4);
 		int hintLine = (PhoneText.GLYPH_H + 2) * mHint;

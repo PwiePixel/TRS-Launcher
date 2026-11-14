@@ -3231,6 +3231,28 @@ class PhoneUiTest {
 	}
 
 	@Test
+	void inPortraitAnOpenSheetHidesTheAuthorRowAndTheRightColumnInsteadOfCuttingThem() {
+		post("Schaut mal!", "Steve_Baut", 2, false);
+		for (PhoneHold hold : PhoneHold.values()) {
+			String tag = hold.toString();
+			boolean land = hold == PhoneHold.LANDSCAPE;
+			for (PhoneUi.Sheet sheet : new PhoneUi.Sheet[]{PhoneUi.Sheet.SAVE, PhoneUi.Sheet.FILTER, PhoneUi.Sheet.STREAK}) {
+				PhoneUi ui = feed(hold);
+				ui.openSheet(sheet);
+				RecCanvas c = frame(ui);
+				assertEquals(sheet, ui.testSheet(), tag);
+				assertEquals(land, ui.testSpot("heart") != null, tag + " " + sheet + ": rechte Spalte");
+				assertEquals(land, c.shows("Schaut mal!"), tag + " " + sheet + ": Bildtext");
+				ui.closeSheet();
+				c = frame(ui);
+				assertNotNull(ui.testSpot("heart"), tag + ": ohne Blatt wieder da");
+				assertTrue(c.shows("Schaut mal!"), tag);
+				ui.dispose();
+			}
+		}
+	}
+
+	@Test
 	void cameraHomeAndCommentsCloseTheSheet() {
 		post("Schaut mal!", host.name, 2, false);
 		PhoneUi ui = feed(PhoneHold.PORTRAIT);
@@ -3770,6 +3792,10 @@ class PhoneUiTest {
 			assertEquals(PhoneUi.Sheet.FILTER, ui.testSheet());
 			frame(ui);
 			click(ui, "filterAll");
+			frame(ui);
+			assertEquals(1, ui.pages(), hold.toString());
+			// Hochkant ruht der Bildtext unter dem offenen Blatt – nach dem Schließen steht er da.
+			ui.closeSheet();
 			assertTrue(frame(ui).shows("Von mir"));
 			assertTrue(chip[3] > 0);
 			ui.dispose();
@@ -4962,6 +4988,42 @@ class PhoneUiTest {
 	}
 
 	@Test
+	void sameCommentIdInTwoPostsShowsEachPostsOwnComment() throws IOException {
+		// Kommentar-IDs sind nur je Post eindeutig – eine von Hand geänderte Datei kann dieselbe in zwei Posts haben.
+		Path dir = tmp.resolve("gleicheIds");
+		Files.createDirectories(dir);
+		String id = "20261113-090000-0000";
+		String json = "{\"version\":1,\"posts\":["
+				+ "{\"id\":\"20261113-100000-0001\",\"photo\":\"20261113-100000-0001.png\",\"width\":1280,\"height\":720,\"author\":\"Anna\","
+				+ "\"caption\":\"Post A\",\"createdAt\":" + (NOON - 2 * 3600000L) + ",\"comments\":[{\"id\":\"" + id
+				+ "\",\"author\":\"Anna\",\"text\":\"Text von Post A\",\"at\":" + (NOON - 7000000L) + "}]},"
+				+ "{\"id\":\"20261113-090000-0002\",\"photo\":\"20261113-090000-0002.png\",\"width\":1280,\"height\":720,\"author\":\"Bert\","
+				+ "\"caption\":\"Post B\",\"createdAt\":" + (NOON - 3 * 3600000L) + ",\"comments\":[{\"id\":\"" + id
+				+ "\",\"author\":\"Bert\",\"text\":\"Text von Post B\",\"at\":" + (NOON - 10000000L) + "}]}]}";
+		Files.write(dir.resolve("feed.json"), json.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+		backend = new LocalReelsBackend(dir, UTC);
+		assertEquals(2, backend.feed().size());
+		reels = Reels.forTest(modules, backend, DIRECT, UTC);
+		for (PhoneHold hold : PhoneHold.values()) {
+			String tag = hold.toString();
+			PhoneUi ui = comments(hold);
+			RecCanvas c = frame(ui);
+			assertTrue(c.shows("Text von Post A"), tag + ": " + c.strings());
+			keys(ui, UiKey.ESCAPE, 1);
+			assertEquals(PhoneUi.View.FEED, ui.testView(), tag);
+			ui.inputScroll(0, 0, -1);
+			frame(ui);
+			assertEquals(1, ui.testPage(), tag);
+			assertTrue(ui.keyPressed(0, UiKey.ENTER, false), tag);
+			assertEquals(PhoneUi.View.COMMENTS, ui.testView(), tag);
+			c = frame(ui);
+			assertTrue(c.shows("Text von Post B"), tag + ": der Kommentar des zweiten Posts: " + c.strings());
+			assertFalse(c.shows("Text von Post A"), tag + ": nicht der zwischengespeicherte des ersten");
+			ui.dispose();
+		}
+	}
+
+	@Test
 	void theEditedCommentIsHighlightedAndVisible() {
 		ReelsPost p = post("Schaut mal!", host.name, 2, false);
 		ReelsComment mine = reels.comment(p.id, host.name, "Mein Text eins", NOON - 20000);
@@ -5842,6 +5904,106 @@ class PhoneUiTest {
 		toast = spot(ui, "toast");
 		ui.inputClick((toast[0] + toast[2] / 2.0) / host.gui, (toast[1] + toast[3] / 2.0) / host.gui, 0);
 		assertEquals(PhoneUi.View.CAMERA, ui.testView());
+		ui.dispose();
+	}
+
+	@Test
+	void aNewerPingReplacesTheOlderPingToastAndOpeningTheCommentsDropsItEverywhere() {
+		ReelsPost p = post("Schaut mal!", host.name, 2, false);
+		PhoneUi ui = feed(PhoneHold.LANDSCAPE);
+		assertNull(ui.testToast());
+		// Die Meldung steht: eine neuere ersetzt sie, statt eine zweite mit anderer Zahl anzustellen.
+		backend.comment(p.id, "Steve_Baut", "@" + host.name + " eins", NOON - 4000);
+		frame(ui);
+		assertEquals(I18n.tr("reels.toast.ping", "Steve_Baut"), ui.testToast());
+		backend.comment(p.id, "Rotkaeppchen", "@" + host.name + " zwei", NOON - 3500);
+		frame(ui);
+		assertEquals(I18n.tr("reels.toast.pings", 2), ui.testToast(), "ersetzt");
+		ui.testTicker += PhoneUi.TOAST_MS + 1;
+		frame(ui);
+		assertNull(ui.testToast(), "danach kommt keine alte mehr");
+
+		// Die Meldung wartet hinter einer anderen: auch dort wird sie ersetzt.
+		ui.announce("Hinweis", null);
+		backend.comment(p.id, "Gast1", "@" + host.name + " drei", NOON - 3000);
+		frame(ui);
+		backend.comment(p.id, "Gast2", "@" + host.name + " vier", NOON - 2500);
+		frame(ui);
+		assertEquals("Hinweis", ui.testToast());
+		ui.testTicker += PhoneUi.TOAST_MS + 1;
+		frame(ui);
+		assertEquals(I18n.tr("reels.toast.pings", 4), ui.testToast(), "nur die neueste wartete");
+		ui.testTicker += PhoneUi.TOAST_MS + 1;
+		frame(ui);
+		assertNull(ui.testToast());
+
+		// Wartet sie noch, wenn alles gesehen ist, kommt sie gar nicht mehr.
+		ui.announce("Hinweis", null);
+		backend.comment(p.id, "Gast3", "@" + host.name + " fünf", NOON - 2000);
+		frame(ui);
+		assertEquals("Hinweis", ui.testToast());
+		ui.openComments();
+		assertEquals(0, ui.testUnseenPings());
+		keys(ui, UiKey.ESCAPE, 1);
+		ui.testTicker += PhoneUi.TOAST_MS + 1;
+		frame(ui);
+		assertNull(ui.testToast(), "keine veraltete Meldung, die ins Leere führt");
+		ui.dispose();
+	}
+
+	@Test
+	void aHeldKeyNeverFallsThroughToTheNextLevel() {
+		ReelsPost p = post("Schaut mal!", host.name, 2, false);
+		reels.comment(p.id, "Steve_Baut", "Stark!", NOON - 3000);
+		PhoneUi ui = feed(PhoneHold.LANDSCAPE);
+		// Tab gehalten: das Blatt geht einmal auf und flackert nicht.
+		host.down.add("key.keyboard.tab");
+		assertTrue(ui.keyPressed(0, UiKey.TAB, false));
+		assertEquals(PhoneUi.Sheet.FILTER, ui.testSheet());
+		for (int i = 0; i < 3; i++) {
+			frame(ui);
+			assertTrue(ui.keyPressed(0, UiKey.TAB, false));
+			assertEquals(PhoneUi.Sheet.FILTER, ui.testSheet(), "Wiederholung " + i);
+		}
+		host.down.clear();
+		frame(ui);
+		assertTrue(ui.keyPressed(0, UiKey.TAB, false));
+		assertEquals(PhoneUi.Sheet.NONE, ui.testSheet(), "losgelassen und neu gedrückt: zu");
+
+		// Enter gehalten im Filter-Blatt: es schließt, die Wiederholung öffnet nicht die Kommentare.
+		ui.openSheet(PhoneUi.Sheet.FILTER);
+		frame(ui);
+		host.down.add("key.keyboard.enter");
+		assertTrue(ui.keyPressed(0, UiKey.ENTER, false));
+		assertEquals(PhoneUi.Sheet.NONE, ui.testSheet());
+		for (int i = 0; i < 3; i++) {
+			frame(ui);
+			assertTrue(ui.keyPressed(0, UiKey.ENTER, false));
+			assertEquals(PhoneUi.View.FEED, ui.testView(), "Wiederholung " + i);
+		}
+		host.down.clear();
+		frame(ui);
+		assertTrue(ui.keyPressed(0, UiKey.ENTER, false));
+		assertEquals(PhoneUi.View.COMMENTS, ui.testView(), "neu gedrückt: die Kommentare");
+		frame(ui);
+
+		// Esc gehalten beim Antworten: nur der Modus geht, das Blatt und das Handy bleiben.
+		click(ui, "commentReply0");
+		frame(ui);
+		assertEquals("REPLY", ui.testCommentMode());
+		host.down.add("key.keyboard.escape");
+		assertTrue(ui.keyPressed(0, UiKey.ESCAPE, false));
+		assertEquals("NEW", ui.testCommentMode());
+		for (int i = 0; i < 3; i++) {
+			frame(ui);
+			assertTrue(ui.keyPressed(0, UiKey.ESCAPE, false), "verbraucht – das Handy bleibt draußen");
+			assertEquals(PhoneUi.View.COMMENTS, ui.testView(), "Wiederholung " + i);
+		}
+		host.down.clear();
+		frame(ui);
+		assertTrue(ui.keyPressed(0, UiKey.ESCAPE, false));
+		assertEquals(PhoneUi.View.FEED, ui.testView());
+		assertFalse(ui.keyPressed(0, UiKey.ESCAPE, false), "Esc im Feed geht wie immer an den Bildschirm");
 		ui.dispose();
 	}
 

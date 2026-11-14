@@ -57,6 +57,8 @@ final class CommentsView {
 	private PhoneLayout wrappedLayout;
 	private int wrappedLanguage;
 	private String wrappedSelf;
+	/** Kommentar-IDs sind nur innerhalb eines Posts eindeutig: der Zwischenspeicher gilt nur für einen Post. */
+	private String wrappedPost;
 
 	CommentsView(PhoneUi ui) {
 		this.ui = ui;
@@ -319,7 +321,7 @@ final class CommentsView {
 			}
 			return;
 		}
-		fresh();
+		fresh(post.id);
 		int skip = Math.max(0, Math.min(n - 1, ui.commentSkip()));
 		List<Laid> laid = lay(rows, skip, width, listTop, listBottom, mC, gap);
 		if (reveal != null) {
@@ -391,15 +393,20 @@ final class CommentsView {
 		return out;
 	}
 
-	/** Der Zwischenspeicher der umbrochenen Kommentare gilt nur für denselben Feed, dasselbe Layout, dieselbe Sprache. */
-	private void fresh() {
+	/**
+	 * Der Zwischenspeicher der umbrochenen Kommentare gilt nur für denselben Feed, denselben Post, dasselbe Layout,
+	 * dieselbe Sprache.
+	 */
+	private void fresh(String postId) {
 		Object feed = ui.feedIdentity();
 		int language = I18n.generation();
 		String self = ui.selfName();
-		if (feed == wrappedFeed && l == wrappedLayout && language == wrappedLanguage && (self == null ? wrappedSelf == null : self.equals(wrappedSelf))) {
+		if (feed == wrappedFeed && l == wrappedLayout && language == wrappedLanguage && (self == null ? wrappedSelf == null : self.equals(wrappedSelf))
+				&& (postId == null ? wrappedPost == null : postId.equals(wrappedPost))) {
 			return;
 		}
 		wrapped.clear();
+		wrappedPost = postId;
 		wrappedFeed = feed;
 		wrappedLayout = l;
 		wrappedLanguage = language;

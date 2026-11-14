@@ -56,6 +56,24 @@ class PhoneTextTest {
 	}
 
 	@Test
+	void wrapWordsKeepsAHyphenatedNameTogether() {
+		String s = "Photos from friends arrive once MC-Reels goes online.";
+		int max = 36 * 6;
+		// Die gewöhnliche Umbruchregel trennt am Bindestrich …
+		assertEquals("Photos from friends arrive once MC-", PhoneText.wrap(c, s, 1, max, 4).get(0));
+		// … diese nicht.
+		assertEquals(java.util.Arrays.asList("Photos from friends arrive once", "MC-Reels goes online."), PhoneText.wrapWords(c, s, 1, max, 4));
+		// Letzte erlaubte Zeile: der Rest kommt dazu und wird gekürzt.
+		java.util.List<String> two = PhoneText.wrapWords(c, s, 1, 12 * 6, 2);
+		assertEquals(2, two.size());
+		assertEquals("Photos from", two.get(0));
+		assertTrue(two.get(1).endsWith("…") && PhoneText.width(c, two.get(1), 1) <= 12 * 6, two.get(1));
+		// Ein Wort allein zu breit: dann doch am Bindestrich.
+		assertEquals(PhoneText.wrap(c, "Ein MC-Reels-Foto", 1, 6 * 6, 3), PhoneText.wrapWords(c, "Ein MC-Reels-Foto", 1, 6 * 6, 3));
+		assertTrue(PhoneText.wrapWords(c, "", 1, max, 2).isEmpty());
+	}
+
+	@Test
 	void windowShowsTheWholeTextWhenItFits() {
 		String s = "Hallo Welt";
 		for (int caret = 0; caret <= s.length(); caret++) {

@@ -155,6 +155,48 @@ final class PhoneText {
 		return out;
 	}
 
+	/**
+	 * Wie {@link #wrap}, aber nur an Leerzeichen: ein Wort mit Bindestrich („MC-Reels“) bleibt beisammen. Erst wenn ein
+	 * Wort allein nicht in die Zeile passt, gilt {@link #wrap} mit seinen Trennungen.
+	 */
+	static List<String> wrapWords(Canvas c, String s, int m, int maxWidth, int maxLines) {
+		List<String> out = new ArrayList<String>();
+		if (s == null || s.isEmpty() || maxWidth <= 0 || maxLines <= 0) return out;
+		int k = Math.max(1, m);
+		int room = maxWidth / k;
+		String[] words = s.split(" ");
+		for (String w : words) {
+			if (c.textWidth(w) > room) return wrap(c, s, m, maxWidth, maxLines);
+		}
+		List<String> lines = new ArrayList<String>();
+		StringBuilder line = new StringBuilder();
+		for (String w : words) {
+			String candidate = line.length() == 0 ? w : line + " " + w;
+			if (line.length() == 0 || c.textWidth(candidate) <= room) {
+				line.setLength(0);
+				line.append(candidate);
+			} else {
+				lines.add(line.toString());
+				line.setLength(0);
+				line.append(w);
+			}
+		}
+		if (line.length() > 0) lines.add(line.toString());
+		for (int i = 0; i < lines.size() && out.size() < maxLines; i++) {
+			boolean last = out.size() == maxLines - 1 && i < lines.size() - 1;
+			String text = lines.get(i);
+			if (last) {
+				StringBuilder rest = new StringBuilder(text);
+				for (int j = i + 1; j < lines.size(); j++) rest.append(' ').append(lines.get(j));
+				text = rest.toString();
+			}
+			String fitted = clip(c, text, k, maxWidth);
+			if (!fitted.isEmpty()) out.add(fitted);
+			if (last) break;
+		}
+		return out;
+	}
+
 	/** Das Ende des Textes, das in {@code maxWidth} passt (Eingabefelder zeigen beim Tippen den Schluss). */
 	static String tail(Canvas c, String s, int m, int maxWidth) {
 		if (s == null || s.isEmpty() || maxWidth <= 0) return "";
